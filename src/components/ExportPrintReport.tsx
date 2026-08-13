@@ -73,7 +73,7 @@ export const ExportPrintReport: React.FC<ExportPrintReportProps> = ({
           <div className="flex items-center space-x-2">
             <Printer className="w-5 h-5 text-amber-300" />
             <h3 className="text-base font-bold text-white">
-              Pratinjau Laporan Rekapitulasi APBS Lazuardi
+              Pratinjau Laporan Monitoring APBS Facility Management
             </h3>
           </div>
           <div className="flex items-center space-x-2">

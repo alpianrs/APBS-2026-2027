@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Monitoring APBS Lazuardi</title>
+    <title>Monitoring APBS Facility Management</title>
     <script>
-      // Guard for window.fetch setter in sandboxed iframe environments
       (function() {
+        // Guard for window.fetch setter in sandboxed iframe environments
         try {
           var originalFetch = window.fetch ? window.fetch.bind(window) : null;
           var currentFetch = originalFetch;
@@ -24,21 +24,58 @@
           console.warn('Fetch property guard init warning:', e);
         }
 
-        // Suppress benign Vite dev server HMR websocket disconnect noise
-        window.addEventListener('unhandledrejection', function(event) {
-          if (event && event.reason && (
-            (typeof event.reason === 'string' && event.reason.includes('WebSocket')) ||
-            (event.reason.message && event.reason.message.includes('WebSocket'))
-          )) {
-            event.preventDefault();
+        // Helper to identify WebSocket / HMR noise
+        function isWsNoise(err) {
+          if (!err) return false;
+          var str = typeof err === 'string' ? err : (err.message || err.reason || String(err));
+          return str.includes('WebSocket') || str.includes('websocket') || str.includes('closed without opened') || str.includes('[vite]');
+        }
+
+        // Suppress unhandled errors and rejections related to Vite WebSocket
+        window.addEventListener('error', function(e) {
+          if (isWsNoise(e.message) || isWsNoise(e.error) || isWsNoise(e.filename)) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            return true;
           }
-        });
+        }, true);
+
+        window.addEventListener('unhandledrejection', function(e) {
+          if (isWsNoise(e.reason)) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            return true;
+          }
+        }, true);
+
+        // Filter console.error and console.warn for WebSocket messages
+        var origError = console.error;
+        console.error = function() {
+          var args = Array.prototype.slice.call(arguments);
+          if (args.some(function(arg) { return isWsNoise(arg); })) {
+            return;
+          }
+          origError.apply(console, args);
+        };
+
+        var origWarn = console.warn;
+        console.warn = function() {
+          var args = Array.prototype.slice.call(arguments);
+          if (args.some(function(arg) { return isWsNoise(arg); })) {
+            return;
+          }
+          origWarn.apply(console, args);
+        };
       })();
     </script>
+    <style>
+      vite-error-overlay {
+        display: none !important;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

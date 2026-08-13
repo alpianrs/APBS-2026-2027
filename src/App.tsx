@@ -17,6 +17,7 @@ import { ApbsItem, ApbsSubmission, ApbsStatusType, ApbsRecapItem } from "./types
 import { calculateApbsRecap, computeApbsSummary } from "./lib/apbsCalculations";
 import { LAZUARDI_MONTHS, getCurrentSchoolMonth, getMonthInfo } from "./lib/constants";
 import { INITIAL_SUBMISSIONS_SAMPLE } from "./lib/initialSubmissions";
+import { fetchDirectCsvData } from "./lib/sheetParser";
 import { RefreshCw, AlertCircle, Settings } from "lucide-react";
 
 const STORAGE_KEY_SUBMISSIONS = "lazuardi_apbs_submissions_v1";
@@ -92,25 +93,33 @@ export default function App() {
     }
   }, [submissions]);
 
-  // Fetch Google Sheet data from server endpoint
+  // Fetch Google Sheet data from server endpoint with direct client fallback
   const fetchSheetData = async () => {
     setIsRefreshing(true);
     setError("");
     try {
-      const res = await fetch(`/api/apbs-data?sheetId=${encodeURIComponent(sheetId)}`);
-      
-      const contentType = res.headers.get("content-type") || "";
-      if (contentType.includes("application/json")) {
-        const data = await res.json();
-        if (!res.ok || !data.success) {
-          throw new Error(data.error || `Gagal memuat data (HTTP ${res.status}).`);
+      let loadedFromApi = false;
+      try {
+        const res = await fetch(`/api/apbs-data?sheetId=${encodeURIComponent(sheetId)}`);
+        const contentType = res.headers.get("content-type") || "";
+        if (res.ok && contentType.includes("application/json")) {
+          const data = await res.json();
+          if (data.success) {
+            setItems(data.items || []);
+            setUnits(data.units || []);
+            loadedFromApi = true;
+          }
         }
+      } catch (apiErr) {
+        console.warn("API proxy fetch error, switching to direct CSV fallback:", apiErr);
+      }
+
+      if (!loadedFromApi) {
+        // Fallback: direct browser CSV fetch and parsing
+        console.log("Loading data via direct CSV parser fallback...");
+        const data = await fetchDirectCsvData(sheetId);
         setItems(data.items || []);
         setUnits(data.units || []);
-      } else {
-        const rawText = await res.text();
-        console.warn("APBS Data Endpoint Non-JSON Response:", rawText.slice(0, 150));
-        throw new Error(`Gagal memuat data (HTTP ${res.status}). Server mengembalikan respon non-JSON.`);
       }
     } catch (err: any) {
       console.error(err);

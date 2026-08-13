@@ -1,5 +1,5 @@
 {
-  "name": "Monitoring APBS Lazuardi",
+  "name": "Monitoring APBS Facility Management",
   "description": "Aplikasi monitoring sisa APBS Lazuardi tanpa login, terhubung dengan Google Sheets. Menampilkan deskripsi item, jadwal pengajuan bulanan (Juli-Juni), pengingat keterlambatan, rekapitulasi pengajuan vs realisasi, serta analisis sisa dana.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
