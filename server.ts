@@ -1,11 +1,11 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
 
+const DEFAULT_PUBLISHED_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTJVTzm62WYEDOahWZz0-6hvMDxS87MtDVsk2Hd4tFMfI8FWnZcK6eW3yYqa9iprImukVV11-T6p5ry/pub?output=csv";
 const DEFAULT_SHEET_ID = "1Eg8UBRpKMufAtvl6EZqDSvlIFFhVc--EZFzCHHHRn8M";
 
 async function startServer() {
@@ -17,20 +17,84 @@ async function startServer() {
   // API Route: Fetch and parse live Google Sheet CSV data
   app.get("/api/apbs-data", async (req, res) => {
     try {
-      const sheetId = (req.query.sheetId as string) || DEFAULT_SHEET_ID;
-      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`;
+      const rawInput = (req.query.sheetId as string) || DEFAULT_PUBLISHED_URL;
+      const str = (rawInput || "").trim();
 
-      const response = await fetch(csvUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+      const candidateUrls: string[] = [];
+
+      if (str.startsWith("http://") || str.startsWith("https://")) {
+        candidateUrls.push(str);
+        if (str.includes("/pub") && !str.includes("output=csv")) {
+          candidateUrls.push(str + (str.includes("?") ? "&output=csv" : "?output=csv"));
         }
-      });
-
-      if (!response.ok) {
-        throw new Error(`Gagal mengambil data Google Sheet (HTTP ${response.status})`);
       }
 
-      const csvText = await response.text();
+      let gid: string | null = null;
+      const gidMatch = str.match(/[?&#]gid=([0-9]+)/);
+      if (gidMatch && gidMatch[1]) gid = gidMatch[1];
+      const gidQuery = gid ? `&gid=${gid}` : "";
+
+      const standardMatch = str.match(/\/d\/([a-zA-Z0-9-_]{20,})/);
+      let cleanId = "";
+      if (standardMatch && standardMatch[1]) {
+        cleanId = standardMatch[1];
+      } else if (!str.includes("/")) {
+        cleanId = str;
+      }
+
+      if (cleanId) {
+        candidateUrls.push(
+          `https://docs.google.com/spreadsheets/d/${cleanId}/gviz/tq?tqx=out:csv${gidQuery}`,
+          `https://docs.google.com/spreadsheets/d/${cleanId}/export?format=csv${gidQuery}`,
+          `https://docs.google.com/spreadsheets/d/${cleanId}/pub?output=csv${gidQuery}`
+        );
+      }
+
+      if (!candidateUrls.includes(DEFAULT_PUBLISHED_URL)) {
+        candidateUrls.push(DEFAULT_PUBLISHED_URL);
+      }
+
+      let csvText = "";
+      let fetchSuccess = false;
+      let lastErrorStatus = 0;
+
+      for (const url of candidateUrls) {
+        try {
+          const response = await fetch(url, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+            },
+            redirect: "follow"
+          });
+
+          if (response.ok) {
+            const text = await response.text();
+            // Check if returned page is HTML (e.g. Google Sign-in or Permission denied page)
+            const isHtml = text.trim().toLowerCase().startsWith("<!doctype html") || text.trim().toLowerCase().startsWith("<html");
+            if (!isHtml && text.length > 20) {
+              csvText = text;
+              fetchSuccess = true;
+              break;
+            }
+          } else {
+            lastErrorStatus = response.status;
+          }
+        } catch (e) {
+          console.warn(`Candidate URL fetch error (${url}):`, e);
+        }
+      }
+
+      if (!fetchSuccess || !csvText) {
+        throw new Error(
+          `Gagal membaca Google Sheet (HTTP ${lastErrorStatus || 404}). Google Sheet belum dapat diakses secara publik.\n\n` +
+          `Langkah Penanganan jika Spreadsheet di Drive Bersama / Grup Tim:\n` +
+          `1. Buka File Google Sheet Anda.\n` +
+          `2. Klik menu 'File' -> 'Publikasikan ke web' (Publish to web).\n` +
+          `3. Pilih opsi 'Nilai yang dipisahkan koma (.csv)' -> Klik tombol 'Publikasikan'.\n` +
+          `4. Atau pastikan menu 'Bagikan' (Share) diubah ke 'Siapa saja yang memiliki link' (Viewer).`
+        );
+      }
+
       const lines = csvText.split("\n");
 
       // Custom robust CSV row parser handling quotes & commas
@@ -265,7 +329,7 @@ async function startServer() {
 
       res.json({
         success: true,
-        sheetId,
+        sheetId: cleanId || rawInput,
         totalItems: items.length,
         units: Array.from(unitsSet),
         categories: Array.from(categoriesSet),
@@ -281,155 +345,6 @@ async function startServer() {
     }
   });
 
-  // API Route: AI Financial Analysis using Gemini
-  app.post("/api/ai-analyze", async (req, res) => {
-    try {
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        return res.status(400).json({
-          error: "GEMINI_API_KEY tidak dikonfigurasi di lingkungan server."
-        });
-      }
-
-      const { summaryData, overdueItems, overBudgetItems, currentMonthName } = req.body;
-
-      const ai = new GoogleGenAI({
-        apiKey,
-        httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build"
-          }
-        }
-      });
-
-      const prompt = `
-Anda adalah Konsultan / Asisten Perencanaan dan Keuangan Sekolah Lazuardi.
-Analisis data Rekapitulasi APBS (Anggaran Pendapatan dan Belanja Sekolah) berikut untuk bulan ${currentMonthName || "Agustus"}:
-
-Ringkasan Anggaran:
-- Total Plafond APBS: Rp ${summaryData?.totalApbs?.toLocaleString("id-ID") || 0}
-- Total Pengajuan APBS: Rp ${summaryData?.totalPengajuan?.toLocaleString("id-ID") || 0}
-- Total Realisasi Penggunaan: Rp ${summaryData?.totalRealisasi?.toLocaleString("id-ID") || 0}
-- Sisa APBS Lazuardi: Rp ${summaryData?.sisaApbs?.toLocaleString("id-ID") || 0}
-- Jumlah Item Telat Pengajuan APBS: ${overdueItems?.length || 0} item
-- Jumlah Item Over Budget ("Di Luar APBS"): ${overBudgetItems?.length || 0} item
-
-Daftar Sampel Item Telat Pengajuan (Harus Segera Diajukan):
-${JSON.stringify(overdueItems?.slice(0, 8) || [])}
-
-Daftar Sampel Item Over Budget / Di Luar APBS:
-${JSON.stringify(overBudgetItems?.slice(0, 8) || [])}
-
-Tugas Anda:
-Buatkan laporan eksekutif singkat dan profesional dalam Bahasa Indonesia dengan format:
-1. **Ringkasan Kesehatan APBS**: Evaluasi persentase daya serap dan ketersediaan anggaran.
-2. **Peringatan & Item Telat (Tindakan Cepat)**: Soroti item yang belum diajukan padahal target bulannya sudah lewat.
-3. **Analisis Realisasi vs Pengajuan ("Di Luar APBS")**: Penjelasan mengenai sisa dana / kelebihan penggunaan.
-4. **Rekomendasi Manajemen Keuangan Lazuardi**: 3 langkah praktis untuk tim keuangan/operasional.
-
-Gunakan bahasa yang santun, profesional, lugas, dan mudah dipahami oleh pengurus sekolah Lazuardi.
-`;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: prompt
-      });
-
-      res.json({
-        success: true,
-        analysis: response.text
-      });
-    } catch (error: any) {
-      console.error("Error generating AI analysis:", error);
-      res.status(500).json({
-        error: error.message || "Gagal membuat analisis AI"
-      });
-    }
-  });
-
-  // API Route: Interactive AI Chat for APBS Q&A
-  app.post("/api/ai-chat", async (req, res) => {
-    try {
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        return res.status(400).json({
-          error: "GEMINI_API_KEY tidak dikonfigurasi di lingkungan server."
-        });
-      }
-
-      const { userQuery, chatHistory, summaryData, sampleItems, currentMonthName } = req.body;
-
-      if (!userQuery) {
-        return res.status(400).json({ error: "Pertanyaan tidak boleh kosong." });
-      }
-
-      const ai = new GoogleGenAI({
-        apiKey,
-        httpOptions: {
-          headers: {
-            "User-Agent": "aistudio-build"
-          }
-        }
-      });
-
-      const formattedItemsContext = Array.isArray(sampleItems)
-        ? sampleItems
-            .slice(0, 100)
-            .map(
-              (item: any, idx: number) =>
-                `${idx + 1}. Kode Rek: [${item.rek || "N/A"}] | Unit: ${item.unit || "N/A"} | Item: ${item.name} | Total APBS: Rp ${(item.targetApbsTotal || item.totalApbs || 0).toLocaleString("id-ID")} | Status LPJ: ${item.isOverdue ? "TERLAMBAT DIAJUKAN" : item.hasSubmission ? "SUDAH DIAJUKAN" : "BELUM DIAJUKAN"}`
-            )
-            .join("\n")
-        : "Tidak ada data item spesifik.";
-
-      const formattedHistory = Array.isArray(chatHistory)
-        ? chatHistory
-            .map((h: any) => `${h.role === "user" ? "Pengguna" : "Asisten AI"}: ${h.text}`)
-            .join("\n")
-        : "";
-
-      const systemPrompt = `
-Anda adalah Asisten Pintar Keuangan & APBS Sekolah Lazuardi.
-Tugas Anda adalah menjawab pertanyaan pengguna secara langsung, ramah, akurat, dan sangat membantu terkait Anggaran Pendapatan dan Belanja Sekolah (APBS) Lazuardi.
-
-RINGKASAN APBS SAAT INI (Bulan Aktif: ${currentMonthName || "Agustus"}):
-- Total Plafond APBS Lazuardi: Rp ${summaryData?.totalApbs?.toLocaleString("id-ID") || 0}
-- Total Pengajuan: Rp ${summaryData?.totalPengajuan?.toLocaleString("id-ID") || 0}
-- Total Realisasi LPJ: Rp ${summaryData?.totalRealisasi?.toLocaleString("id-ID") || 0}
-- Sisa APBS: Rp ${summaryData?.sisaApbs?.toLocaleString("id-ID") || 0}
-
-SAMPEL DATA ITEM APBS KELOMPOK LAZUARDI (#Rek dari Kolom H):
-${formattedItemsContext}
-
-RIWAYAT PERCAKAPAN SEBELUMNYA:
-${formattedHistory}
-
-PERTANYAAN TERBARU PENGGUNA:
-"${userQuery}"
-
-PANDUAN MENJAWAB:
-1. Jika pengguna bertanya apa yang HARUS DIAJUKAN TERLEBIH DAHULU: Cek item yang statusnya "TERLAMBAT DIAJUKAN" atau item anggaran bulan berjalan yang belum diajukan. Sebutkan Nama Item, Unit, dan Kode Rekening (#Rek)-nya.
-2. Jika pengguna bertanya KODE APBS (#Rek) suatu kegiatan/barang: Cari di sampel data item di atas dan berikan Kode Rekening (#Rek) yang cocok beserta nama unitnya. Jika tidak ada, berikan saran kode rekening yang paling mendekati kategori tersebut.
-3. Jika pengguna bertanya sisa anggaran per unit/kategori: Jawab dengan ramah berdasarkan data APBS Lazuardi.
-4. Gunakan Bahasa Indonesia yang sopan, terstruktur (dengan poin/bullet bila perlu), lugas, dan profesional untuk manajemen Lazuardi.
-`;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: systemPrompt
-      });
-
-      res.json({
-        success: true,
-        reply: response.text
-      });
-    } catch (error: any) {
-      console.error("Error in AI Chat:", error);
-      res.status(500).json({
-        error: error.message || "Gagal mendapatkan jawaban dari Gemini AI"
-      });
-    }
-  });
   app.post("/api/delete-submission", (req, res) => {
     const { subId, pin } = req.body;
     if (pin !== "123") {

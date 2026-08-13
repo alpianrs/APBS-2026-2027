@@ -10,24 +10,33 @@ import { PurchaseItemsDetailModal } from "./components/PurchaseItemsDetailModal"
 import { AppsScriptModal } from "./components/AppsScriptModal";
 import { PinModal } from "./components/PinModal";
 import { ApbsCharts } from "./components/ApbsCharts";
-import { AiAnalysisModal } from "./components/AiAnalysisModal";
 import { ExportPrintReport } from "./components/ExportPrintReport";
+import { SheetIdModal } from "./components/SheetIdModal";
 
 import { ApbsItem, ApbsSubmission, ApbsStatusType, ApbsRecapItem } from "./types";
 import { calculateApbsRecap, computeApbsSummary } from "./lib/apbsCalculations";
 import { LAZUARDI_MONTHS, getCurrentSchoolMonth, getMonthInfo } from "./lib/constants";
 import { INITIAL_SUBMISSIONS_SAMPLE } from "./lib/initialSubmissions";
-import { RefreshCw, AlertCircle } from "lucide-react";
+import { RefreshCw, AlertCircle, Settings } from "lucide-react";
 
 const STORAGE_KEY_SUBMISSIONS = "lazuardi_apbs_submissions_v1";
+const DEFAULT_SHEET_ID = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTJVTzm62WYEDOahWZz0-6hvMDxS87MtDVsk2Hd4tFMfI8FWnZcK6eW3yYqa9iprImukVV11-T6p5ry/pub?output=csv";
 
 export default function App() {
-  const [sheetId] = useState<string>("1Eg8UBRpKMufAtvl6EZqDSvlIFFhVc--EZFzCHHHRn8M");
+  const [sheetId, setSheetId] = useState<string>(() => {
+    try {
+      return localStorage.getItem("lazuardi_apbs_sheet_id") || DEFAULT_SHEET_ID;
+    } catch {
+      return DEFAULT_SHEET_ID;
+    }
+  });
+
   const [items, setItems] = useState<ApbsItem[]>([]);
   const [units, setUnits] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
+  const [isSheetIdModalOpen, setIsSheetIdModalOpen] = useState<boolean>(false);
 
   // Submissions state (stored in localStorage, clean default)
   const [submissions, setSubmissions] = useState<ApbsSubmission[]>(() => {
@@ -69,7 +78,6 @@ export default function App() {
   const [isPurchaseDetailModalOpen, setIsPurchaseDetailModalOpen] = useState<boolean>(false);
   const [purchaseDetailTarget, setPurchaseDetailTarget] = useState<{ sub: ApbsSubmission; item: ApbsItem } | null>(null);
 
-  const [isAiModalOpen, setIsAiModalOpen] = useState<boolean>(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
   const [isAppsScriptModalOpen, setIsAppsScriptModalOpen] = useState<boolean>(false);
   const [isPinModalOpen, setIsPinModalOpen] = useState<boolean>(false);
@@ -89,27 +97,21 @@ export default function App() {
     setIsRefreshing(true);
     setError("");
     try {
-      const res = await fetch(`/api/apbs-data?sheetId=${sheetId}`);
+      const res = await fetch(`/api/apbs-data?sheetId=${encodeURIComponent(sheetId)}`);
       
       const contentType = res.headers.get("content-type") || "";
-      if (!res.ok || !contentType.includes("application/json")) {
+      if (contentType.includes("application/json")) {
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || `Gagal memuat data (HTTP ${res.status}).`);
+        }
+        setItems(data.items || []);
+        setUnits(data.units || []);
+      } else {
         const rawText = await res.text();
         console.warn("APBS Data Endpoint Non-JSON Response:", rawText.slice(0, 150));
-        throw new Error(
-          !res.ok 
-            ? `Gagal memuat data (HTTP ${res.status}). Silakan coba beberapa saat lagi.` 
-            : "Server mengembalikan respon selain JSON."
-        );
+        throw new Error(`Gagal memuat data (HTTP ${res.status}). Server mengembalikan respon non-JSON.`);
       }
-
-      const data = await res.json();
-
-      if (!data.success) {
-        throw new Error(data.error || "Gagal mengambil data dari Google Sheet");
-      }
-
-      setItems(data.items || []);
-      setUnits(data.units || []);
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Gagal terhubung ke Google Sheet");
@@ -265,10 +267,10 @@ export default function App() {
         sheetId={sheetId}
         isRefreshing={isRefreshing}
         onRefresh={fetchSheetData}
+        onOpenSheetIdModal={() => setIsSheetIdModalOpen(true)}
         onOpenNewSubmission={handleOpenNewSubmission}
         onToggleCharts={() => setShowCharts(!showCharts)}
         showCharts={showCharts}
-        onOpenAiModal={() => setIsAiModalOpen(true)}
         onOpenPrintReport={() => setIsPrintModalOpen(true)}
         onOpenAppsScript={() => setIsAppsScriptModalOpen(true)}
         activeMonthNum={activeMonthNum}
@@ -286,22 +288,42 @@ export default function App() {
                 Membaca & Memproses Data Google Sheet APBS Lazuardi...
               </h3>
               <p className="text-xs text-slate-500">
-                Menghubungkan ke Spreadsheet ID: {sheetId}
+                Menghubungkan ke Spreadsheet: {sheetId.slice(0, 20)}...
               </p>
             </div>
           </div>
         ) : error ? (
-          <div className="bg-rose-50 border border-rose-300 rounded-2xl p-6 my-8 text-rose-900 flex items-start space-x-3">
+          <div className="bg-rose-50 border border-rose-300 rounded-2xl p-6 my-8 text-rose-900 flex items-start space-x-3.5 shadow-xs">
             <AlertCircle className="w-6 h-6 text-rose-600 flex-shrink-0 mt-0.5" />
-            <div className="space-y-2">
-              <h3 className="font-bold text-sm">Gagal Mengambil Data APBS</h3>
-              <p className="text-xs">{error}</p>
-              <button
-                onClick={fetchSheetData}
-                className="px-4 py-1.5 bg-rose-600 text-white rounded-lg text-xs font-bold hover:bg-rose-700 transition-colors"
-              >
-                Coba Sinkronisasi Ulang
-              </button>
+            <div className="space-y-3 w-full">
+              <h3 className="font-bold text-sm text-rose-950 flex items-center justify-between">
+                <span>Gagal Mengambil Data Google Sheet APBS</span>
+                <button
+                  onClick={() => setIsSheetIdModalOpen(true)}
+                  className="px-3 py-1 bg-white border border-rose-300 text-rose-900 hover:bg-rose-100 rounded-lg text-xs font-bold transition-all shadow-2xs"
+                >
+                  Ganti Link / ID Sheet
+                </button>
+              </h3>
+
+              <div className="text-xs whitespace-pre-line leading-relaxed text-rose-900 font-medium bg-white/70 p-3.5 rounded-xl border border-rose-200/80">
+                {error}
+              </div>
+
+              <div className="flex items-center space-x-3 pt-1">
+                <button
+                  onClick={fetchSheetData}
+                  className="px-4 py-2 bg-rose-600 text-white rounded-xl text-xs font-bold hover:bg-rose-700 transition-colors shadow-xs"
+                >
+                  Coba Sinkronisasi Ulang
+                </button>
+                <button
+                  onClick={() => setIsSheetIdModalOpen(true)}
+                  className="px-4 py-2 bg-slate-900 text-amber-300 rounded-xl text-xs font-bold hover:bg-slate-800 transition-colors shadow-xs"
+                >
+                  Panduan & Masukkan URL Sheet
+                </button>
+              </div>
             </div>
           </div>
         ) : (
@@ -380,15 +402,6 @@ export default function App() {
         item={purchaseDetailTarget?.item || null}
       />
 
-      {/* AI Executive Analysis Modal */}
-      <AiAnalysisModal
-        isOpen={isAiModalOpen}
-        onClose={() => setIsAiModalOpen(false)}
-        summary={summaryMetrics}
-        recapItems={allRecapItems}
-        currentMonthName={activeMonthInfo.name}
-      />
-
       {/* Printable Report Modal */}
       <ExportPrintReport
         isOpen={isPrintModalOpen}
@@ -415,6 +428,20 @@ export default function App() {
         onSuccess={handleConfirmDelete}
         title="Otorisasi Akses PIN Pengurus"
         description="Masukkan PIN keamanan 123 untuk menghapus pengajuan APBS dari aplikasi dan Google Sheet."
+      />
+
+      {/* Google Spreadsheet URL/ID Modal */}
+      <SheetIdModal
+        isOpen={isSheetIdModalOpen}
+        onClose={() => setIsSheetIdModalOpen(false)}
+        currentSheetId={sheetId}
+        onSaveSheetId={(newId) => {
+          setSheetId(newId);
+          try {
+            localStorage.setItem("lazuardi_apbs_sheet_id", newId);
+          } catch {}
+        }}
+        defaultSheetId={DEFAULT_SHEET_ID}
       />
 
     </div>

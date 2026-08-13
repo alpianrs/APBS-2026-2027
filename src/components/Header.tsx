@@ -4,9 +4,7 @@ import {
   PlusCircle,
   RefreshCw,
   BarChart3,
-  Bot,
   Printer,
-  Sparkles,
   Calendar,
   FileCode
 } from "lucide-react";
@@ -16,10 +14,10 @@ interface HeaderProps {
   sheetId: string;
   isRefreshing: boolean;
   onRefresh: () => void;
+  onOpenSheetIdModal: () => void;
   onOpenNewSubmission: () => void;
   onToggleCharts: () => void;
   showCharts: boolean;
-  onOpenAiModal: () => void;
   onOpenPrintReport: () => void;
   onOpenAppsScript: () => void;
   activeMonthNum: number;
@@ -30,10 +28,10 @@ export const Header: React.FC<HeaderProps> = ({
   sheetId,
   isRefreshing,
   onRefresh,
+  onOpenSheetIdModal,
   onOpenNewSubmission,
   onToggleCharts,
   showCharts,
-  onOpenAiModal,
   onOpenPrintReport,
   onOpenAppsScript,
   activeMonthNum,
@@ -58,7 +56,7 @@ export const Header: React.FC<HeaderProps> = ({
                   Sistem Kontrol Pengajuan & LPJ
                 </span>
               </div>
-              <p className="text-xs text-blue-200/90 mt-0.5 flex items-center space-x-2">
+              <p className="text-xs text-blue-200/90 mt-0.5 flex items-center space-x-2 flex-wrap">
                 <FileSpreadsheet className="w-3.5 h-3.5 text-amber-300" />
                 <span>Google Sheet Live Sync</span>
                 <span className="text-amber-400">•</span>
@@ -66,11 +64,18 @@ export const Header: React.FC<HeaderProps> = ({
                   href={`https://docs.google.com/spreadsheets/d/${sheetId}/edit?usp=sharing`}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-amber-300 font-semibold underline hover:text-amber-200 truncate max-w-[200px] sm:max-w-xs"
+                  className="text-amber-300 font-semibold underline hover:text-amber-200 truncate max-w-[150px] sm:max-w-xs"
                   title="Buka Sheet di Google Sheets"
                 >
-                  Spreadsheet ID: {sheetId.slice(0, 10)}...
+                  ID: {sheetId.slice(0, 10)}...
                 </a>
+                <button
+                  onClick={onOpenSheetIdModal}
+                  className="px-2 py-0.5 rounded bg-blue-900/80 hover:bg-amber-400 hover:text-slate-950 text-amber-300 border border-amber-400/40 text-[10px] font-bold transition-all"
+                  title="Ganti Link / ID Spreadsheet"
+                >
+                  Ganti Link / ID
+                </button>
               </p>
             </div>
           </div>
@@ -104,15 +109,6 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <RefreshCw className={`w-3.5 h-3.5 mr-1.5 text-amber-300 ${isRefreshing ? "animate-spin" : ""}`} />
               <span>{isRefreshing ? "Syncing..." : "Sync Sheet"}</span>
-            </button>
-
-            {/* AI Analysis Button */}
-            <button
-              onClick={onOpenAiModal}
-              className="inline-flex items-center px-3 py-1.5 border border-amber-400/60 rounded-xl text-xs font-bold bg-amber-400/20 text-amber-300 hover:bg-amber-400/30 transition-all shadow-xs"
-            >
-              <Sparkles className="w-3.5 h-3.5 mr-1.5 text-amber-300 animate-pulse" />
-              <span>Analisis AI</span>
             </button>
 
             {/* Charts Toggle */}
