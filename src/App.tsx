@@ -90,6 +90,18 @@ export default function App() {
     setError("");
     try {
       const res = await fetch(`/api/apbs-data?sheetId=${sheetId}`);
+      
+      const contentType = res.headers.get("content-type") || "";
+      if (!res.ok || !contentType.includes("application/json")) {
+        const rawText = await res.text();
+        console.warn("APBS Data Endpoint Non-JSON Response:", rawText.slice(0, 150));
+        throw new Error(
+          !res.ok 
+            ? `Gagal memuat data (HTTP ${res.status}). Silakan coba beberapa saat lagi.` 
+            : "Server mengembalikan respon selain JSON."
+        );
+      }
+
       const data = await res.json();
 
       if (!data.success) {

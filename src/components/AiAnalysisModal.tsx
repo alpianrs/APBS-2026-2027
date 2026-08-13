@@ -106,6 +106,17 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
         })
       });
 
+      const contentType = response.headers.get("content-type") || "";
+      if (!response.ok || !contentType.includes("application/json")) {
+        const rawText = await response.text();
+        console.warn("AI Analyze Non-JSON Response:", rawText.slice(0, 150));
+        throw new Error(
+          !response.ok 
+            ? `Server Error (${response.status}) saat analisis AI.` 
+            : "Respon server AI tidak berformat JSON."
+        );
+      }
+
       const data = await response.json();
       if (!data.success) {
         throw new Error(data.error || "Gagal membuat laporan AI");
@@ -170,6 +181,17 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
           currentMonthName
         })
       });
+
+      const contentType = response.headers.get("content-type") || "";
+      if (!response.ok || !contentType.includes("application/json")) {
+        const rawText = await response.text();
+        console.warn("AI Chat Non-JSON Response:", rawText.slice(0, 150));
+        throw new Error(
+          !response.ok 
+            ? `Server Error (${response.status}) saat memproses chat.` 
+            : "Respon server AI tidak berformat JSON."
+        );
+      }
 
       const data = await response.json();
       if (!data.success) {
