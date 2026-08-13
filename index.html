@@ -23,6 +23,16 @@
         } catch (e) {
           console.warn('Fetch property guard init warning:', e);
         }
+
+        // Suppress benign Vite dev server HMR websocket disconnect noise
+        window.addEventListener('unhandledrejection', function(event) {
+          if (event && event.reason && (
+            (typeof event.reason === 'string' && event.reason.includes('WebSocket')) ||
+            (event.reason.message && event.reason.message.includes('WebSocket'))
+          )) {
+            event.preventDefault();
+          }
+        });
       })();
     </script>
   </head>

@@ -13,7 +13,8 @@ import {
   Trash2,
   FileCheck,
   ShoppingBag,
-  Eye
+  Eye,
+  ArrowDownCircle
 } from "lucide-react";
 import { ApbsRecapItem, ApbsSubmission, ApbsItem } from "../types";
 import { formatRupiah, LAZUARDI_MONTHS } from "../lib/constants";
@@ -41,7 +42,7 @@ export const ApbsTable: React.FC<ApbsTableProps> = ({
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortAsc, setSortAsc] = useState<boolean>(true);
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const itemsPerPage = 15;
+  const [itemsPerPage, setItemsPerPage] = useState<number | "ALL">(15);
 
   const toggleRow = (id: string) => {
     setExpandedRows((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -87,11 +88,22 @@ export const ApbsTable: React.FC<ApbsTableProps> = ({
   });
 
   // Pagination logic
-  const totalPages = Math.ceil(sortedItems.length / itemsPerPage) || 1;
+  const effectiveItemsPerPage = itemsPerPage === "ALL" ? (sortedItems.length || 1) : itemsPerPage;
+  const totalPages = Math.ceil(sortedItems.length / effectiveItemsPerPage) || 1;
   const paginatedItems = sortedItems.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
+    (currentPage - 1) * effectiveItemsPerPage,
+    currentPage * effectiveItemsPerPage
   );
+
+  // Grand totals for current filtered recap items
+  const totalPlafond = recapItems.reduce((acc, curr) => acc + curr.targetApbsTotal, 0);
+  const totalPengajuan = recapItems.reduce((acc, curr) => acc + curr.totalPengajuan, 0);
+  const totalRealisasi = recapItems.reduce((acc, curr) => acc + curr.totalRealisasi, 0);
+  const totalSisa = recapItems.reduce((acc, curr) => acc + curr.sisaApbs, 0);
+
+  const scrollToTotal = () => {
+    document.getElementById("total-apbs-footer")?.scrollIntoView({ behavior: "smooth" });
+  };
 
   const renderStatusBadge = (r: ApbsRecapItem) => {
     switch (r.status) {
@@ -148,6 +160,51 @@ export const ApbsTable: React.FC<ApbsTableProps> = ({
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-md overflow-hidden mb-8">
+      
+      {/* Table Control Header */}
+      <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center space-x-2">
+          <Layers className="w-5 h-5 text-[#0F2C59]" />
+          <h3 className="font-extrabold text-slate-900 text-sm">
+            Rincian Detail APBS Lazuardi
+          </h3>
+          <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-200 text-slate-800">
+            {sortedItems.length} Item
+          </span>
+        </div>
+
+        <div className="flex items-center space-x-2 flex-wrap gap-y-2">
+          {/* Scroll Directly to Total APBS Button */}
+          <button
+            onClick={scrollToTotal}
+            className="inline-flex items-center space-x-1.5 px-3.5 py-1.5 bg-gradient-to-r from-[#0F2C59] to-blue-900 text-amber-300 hover:from-slate-800 hover:to-blue-800 rounded-xl text-xs font-extrabold transition-all shadow-xs cursor-pointer border border-amber-400/40"
+            title="Klik untuk langsung menuju Seluruh Total APBS di bagian bawah"
+          >
+            <ArrowDownCircle className="w-4 h-4 text-amber-400" />
+            <span>Seluruh Total APBS (Langsung ke Bawah)</span>
+          </button>
+
+          {/* Items Per Page Selector */}
+          <div className="flex items-center space-x-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-300 rounded-xl px-2.5 py-1 shadow-2xs">
+            <span>Tampilkan:</span>
+            <select
+              value={itemsPerPage}
+              onChange={(e) => {
+                const val = e.target.value === "ALL" ? "ALL" : Number(e.target.value);
+                setItemsPerPage(val);
+                setCurrentPage(1);
+              }}
+              className="font-bold text-slate-900 bg-transparent focus:outline-none cursor-pointer"
+            >
+              <option value={15}>15 Item per Halaman</option>
+              <option value={30}>30 Item per Halaman</option>
+              <option value={50}>50 Item per Halaman</option>
+              <option value="ALL">Semua ({sortedItems.length} Item - Seluruh APBS)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs border-collapse">
           <thead>
@@ -517,6 +574,44 @@ export const ApbsTable: React.FC<ApbsTableProps> = ({
               })
             )}
           </tbody>
+
+          {/* Grand Total APBS Footer Row */}
+          <tfoot id="total-apbs-footer" className="bg-slate-900 text-white font-bold border-t-4 border-amber-400 shadow-md">
+            <tr>
+              <td colSpan={3} className="py-4 px-4 text-left">
+                <div className="flex items-center space-x-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse shrink-0"></div>
+                  <div>
+                    <div className="text-xs uppercase tracking-wider text-amber-300 font-extrabold">
+                      SELURUH TOTAL APBS ({recapItems.length} Item)
+                    </div>
+                    <div className="text-[10px] text-slate-300 font-normal">
+                      Total Kumulatif dari Seluruh Anggaran & Pengajuan APBS
+                    </div>
+                  </div>
+                </div>
+              </td>
+              <td className="py-4 px-3 text-right font-mono text-sm text-white font-black">
+                {formatRupiah(totalPlafond)}
+              </td>
+              <td className="py-4 px-3 text-right font-mono text-sm text-blue-300 font-black">
+                {formatRupiah(totalPengajuan)}
+              </td>
+              <td className="py-4 px-3 text-right font-mono text-sm text-amber-300 font-black">
+                {formatRupiah(totalRealisasi)}
+              </td>
+              <td
+                className={`py-4 px-3 text-right font-mono text-sm font-black ${
+                  totalSisa < 0 ? "text-rose-400" : "text-emerald-400"
+                }`}
+              >
+                {formatRupiah(totalSisa)}
+              </td>
+              <td colSpan={2} className="py-4 px-3 text-center text-xs text-amber-300/90 font-extrabold">
+                Grand Total APBS
+              </td>
+            </tr>
+          </tfoot>
         </table>
       </div>
 
