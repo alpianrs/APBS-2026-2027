@@ -52,12 +52,12 @@ export const AppsScriptModal: React.FC<AppsScriptModalProps> = ({
 
   const appScriptCode = `/**
  * ====================================================================
- * GOOGLE APPS SCRIPT - MONITORING APBS & AUTOMATED LPJ LAZUARDI (V2.1)
+ * GOOGLE APPS SCRIPT - MONITORING APBS & AUTOMATED LPJ LAZUARDI (V3.0)
  * ====================================================================
- * Fitur Lengkap:
- * 1. Otomatisasi Pencatatan Pengajuan & Realisasi LPJ langsung ke tab LOG_PENGAJUAN_LPJ.
- * 2. Mendukung Sinkronisasi Dua Arah & Hapus dengan PIN Keamanan 123.
- * 3. Pembacaan Kode Rekening APBS (#Rek) dari Kolom H (index 7).
+ * Fitur:
+ * 1. Mendukung Universal GET dan POST (Bekerja 100% di semua akun Google Workspace & Pribadi).
+ * 2. Otomatisasi Pencatatan Pengajuan & Realisasi LPJ langsung ke tab LOG_PENGAJUAN_LPJ.
+ * 3. Mendukung Sinkronisasi Dua Arah & Hapus dengan PIN Keamanan 123.
  * 4. Menu kustom "🟢 APBS Lazuardi" di Spreadsheet.
  */
 
@@ -97,19 +97,9 @@ function setupLpjLogSheet() {
   }
 }
 
-// 3. MENERIMA TEST PING DARI APLIKASI (GET)
-function doGet(e) {
-  return ContentService.createTextOutput(JSON.stringify({
-    status: 'ok',
-    message: 'Webhook Google Apps Script APBS Lazuardi Aktif & Siap Digunakan!'
-  })).setMimeType(ContentService.MimeType.JSON);
-}
-
-// 4. WEBHOOK PENERIMA DATA DARI WEB APP (POST)
-function doPost(e) {
+// 3. UNIVERSAL HANDLER UNTUK PROSES DATA (GET & POST)
+function handleRequest(data) {
   try {
-    const rawContent = (e && e.postData) ? e.postData.contents : '{}';
-    const data = JSON.parse(rawContent);
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let sheet = ss.getSheetByName('LOG_PENGAJUAN_LPJ');
     
@@ -127,19 +117,49 @@ function doPost(e) {
       sheet.setFrozenRows(1);
     }
 
-    // A. PENANGANAN AKSI HAPUS PENGAJUAN (VERIFIKASI PIN 123)
+    // A. TEST PING
+    if (!data || data.action === 'ping') {
+      return {
+        success: true,
+        status: 'ok',
+        message: '🟢 Webhook Google Apps Script APBS Lazuardi Aktif & Siap Digunakan!'
+      };
+    }
+
+    // B. AMBIL DATA LPJ (READ)
+    if (data.action === 'read') {
+      const values = sheet.getDataRange().getValues();
+      const rows = [];
+      for (let r = 1; r < values.length; r++) {
+        if (values[r][0] && values[r][12] !== 'DIHAPUS_PIN_123') {
+          rows.push({
+            id: values[r][0],
+            tanggalPengajuan: values[r][1],
+            monthNum: values[r][2],
+            rek: values[r][3],
+            itemName: values[r][4],
+            nominalPengajuan: Number(values[r][5] || 0),
+            nominalRealisasi: Number(values[r][6] || 0),
+            selisih: Number(values[r][7] || 0),
+            status: values[r][8],
+            noSpkOrKwitansi: values[r][9],
+            catatan: values[r][11]
+          });
+        }
+      }
+      return { success: true, submissions: rows, total: rows.length };
+    }
+
+    // C. HAPUS PENGAJUAN (VERIFIKASI PIN 123)
     if (data.action === 'delete') {
-      if (data.pin !== '123') {
-        return ContentService.createTextOutput(JSON.stringify({
-          success: false,
-          error: 'PIN Otorisasi Penghapusan Salah!'
-        })).setMimeType(ContentService.MimeType.JSON);
+      if (String(data.pin) !== '123') {
+        return { success: false, error: 'PIN Otorisasi Penghapusan Salah!' };
       }
 
       const values = sheet.getDataRange().getValues();
       let found = false;
       for (let r = 1; r < values.length; r++) {
-        if (values[r][0] === data.subId) {
+        if (String(values[r][0]) === String(data.subId)) {
           sheet.getRange(r + 1, 13).setValue('DIHAPUS_PIN_123');
           sheet.getRange(r + 1, 1, 1, 13).setBackground('#FEE2E2');
           found = true;
@@ -147,25 +167,25 @@ function doPost(e) {
         }
       }
 
-      return ContentService.createTextOutput(JSON.stringify({
+      return {
         success: true,
         message: found ? 'Data pengajuan berhasil ditandai dihapus!' : 'ID transaksi tidak ditemukan di log.'
-      })).setMimeType(ContentService.MimeType.JSON);
+      };
     }
 
-    // B. PENANGANAN SIMPAN BATCH ATAU SINGLE SUBMISSION
+    // D. SIMPAN ATAU UPDATE PENGAJUAN
     const listToSave = data.submissions || (data.id || data.nominalPengajuan ? [data] : []);
     const existingValues = sheet.getDataRange().getValues();
     const existingIdMap = {};
     for (let r = 1; r < existingValues.length; r++) {
-      existingIdMap[existingValues[r][0]] = r + 1; // baris di spreadsheet (1-indexed)
+      existingIdMap[String(values = existingValues[r][0])] = r + 1;
     }
 
     for (let i = 0; i < listToSave.length; i++) {
       const item = listToSave[i];
       if (!item) continue;
 
-      const id = item.id || 'SUB-' + new Date().getTime();
+      const id = String(item.id || 'SUB-' + new Date().getTime());
       const tgl = item.tanggalPengajuan || new Date().toISOString().split('T')[0];
       const bulan = item.monthNum || '-';
       const rek = item.rek || item.itemRek || '-';
@@ -182,26 +202,53 @@ function doPost(e) {
       const rowValues = [id, tgl, bulan, rek, name, nominalPengajuan, nominalRealisasi, selisih, status, noSpk, purchaseInfo, catatan, statusTransaksi];
 
       if (existingIdMap[id]) {
-        // Update baris yang sudah ada
         sheet.getRange(existingIdMap[id], 1, 1, rowValues.length).setValues([rowValues]);
       } else {
-        // Tambahkan baris baru
         sheet.appendRow(rowValues);
       }
     }
 
-    return ContentService.createTextOutput(JSON.stringify({
+    return {
       success: true,
       count: listToSave.length,
-      message: 'Berhasil mencatat ' + listToSave.length + ' data ke tab LOG_PENGAJUAN_LPJ di Google Sheet!'
-    })).setMimeType(ContentService.MimeType.JSON);
+      message: 'Berhasil mencatat ' + listToSave.length + ' data ke tab LOG_PENGAJUAN_LPJ!'
+    };
     
-  } catch (error) {
-    return ContentService.createTextOutput(JSON.stringify({
-      success: false,
-      error: error.toString()
-    })).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return { success: false, error: err.toString() };
   }
+}
+
+// 4. MENERIMA PERMINTAAN GET DARI WEB / BROWSER
+function doGet(e) {
+  let data = {};
+  if (e && e.parameter) {
+    if (e.parameter.data) {
+      try { data = JSON.parse(e.parameter.data); } catch(x) {}
+    } else {
+      data = e.parameter;
+    }
+  }
+  const result = handleRequest(data);
+  return ContentService.createTextOutput(JSON.stringify(result))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// 5. MENERIMA PERMINTAAN POST DARI APLIKASI
+function doPost(e) {
+  let data = {};
+  try {
+    if (e && e.postData && e.postData.contents) {
+      data = JSON.parse(e.postData.contents);
+    } else if (e && e.parameter) {
+      data = e.parameter;
+    }
+  } catch (err) {
+    data = (e && e.parameter) ? e.parameter : {};
+  }
+  const result = handleRequest(data);
+  return ContentService.createTextOutput(JSON.stringify(result))
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
 function testWebhook() {
@@ -424,14 +471,18 @@ function testWebhook() {
                 Hapus semua kode lama di editor, lalu klik tombol <strong>"Salin Script"</strong> di bawah dan <strong>Paste (Tempel)</strong> ke Apps Script. Klik <strong>Simpan (Save / Ikon Disket)</strong>.
               </li>
               <li>
-                Klik tombol biru <strong>Terapkan (Deploy)</strong> di kanan atas &rarr; <strong>Deployment Baru (New deployment)</strong> &rarr; Pilih jenis: <strong>Aplikasi Web (Web app)</strong>.
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 mt-1.5 text-[11px] text-amber-950 font-medium">
-                  • <strong>Jalankan sebagai (Execute as):</strong> <em>Saya (email Anda)</em><br />
-                  • <strong>Siapa yang memiliki akses (Who has access):</strong> <em>Siapa saja (Anyone)</em>
+                Klik tombol biru <strong>Terapkan (Deploy)</strong> di kanan atas &rarr; pilih <strong>Deployment Baru (New deployment)</strong>:
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 mt-1.5 text-[11px] text-amber-950 font-medium space-y-1">
+                  <div>• <strong>Jenis:</strong> Pilih ikon gerigi &rarr; <strong>Aplikasi Web (Web app)</strong></div>
+                  <div>• <strong>Jalankan sebagai (Execute as):</strong> <em>Saya (email Anda / Alpianrs@lazuardi.sch.id)</em></div>
+                  <div>• <strong>Siapa yang memiliki akses (Who has access):</strong> <em>Siapa saja (Anyone)</em></div>
+                  <div className="text-rose-900 font-bold pt-1 border-t border-amber-200">
+                    ⚠️ PENTING: Klik tombol biru "Terapkan" (Deploy) di kanan bawah dialog Google Apps Script! (Jika menggunakan 'Kelola Deployment', pastikan memilih dropdown 'Versi Baru' sebelum klik Terapkan).
+                  </div>
                 </div>
               </li>
               <li>
-                Salin <strong>URL Aplikasi Web (Web App URL)</strong> yang berakhiran <code>/exec</code>, lalu tempelkan ke kolom URL di atas dan klik <strong>Simpan URL</strong>.
+                Setelah muncul jendela konfirmasi, klik <strong>Salin (Copy)</strong> pada <strong>URL Aplikasi Web (Web App URL)</strong> yang berakhiran <code>/exec</code>, lalu tempelkan ke kolom URL di atas dan klik <strong>Simpan URL</strong>.
               </li>
             </ol>
           </div>

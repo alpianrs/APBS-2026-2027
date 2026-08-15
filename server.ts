@@ -149,8 +149,35 @@ async function startServer() {
         return res.json({
           success: false,
           reason: "INVALID_SPREADSHEET_URL",
-          message: "URL yang dimasukkan adalah link Google Spreadsheet, bukan link Web App Apps Script. Silakan ikuti petunjuk Deploy Web App (URL yang berakhiran /exec)."
+          message: "URL yang dimasukkan adalah link Google Spreadsheet, bukan link Web App Apps Script. Silakan gunakan URL Web App yang berakhiran /exec."
         });
+      }
+
+      // If ping action, attempt GET first to verify script is active and deployed
+      if (action === "ping") {
+        try {
+          const getRes = await fetch(targetUrl, {
+            method: "GET",
+            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+            redirect: "follow"
+          });
+          const getText = await getRes.text();
+          let getJson: any = null;
+          try {
+            getJson = JSON.parse(getText);
+          } catch {}
+
+          if (getJson && (getJson.status === "ok" || getJson.success)) {
+            return res.json({
+              success: true,
+              targetUrl,
+              result: getJson,
+              message: "Koneksi Google Apps Script Web App Berhasil & Aktif!"
+            });
+          }
+        } catch (getErr) {
+          console.warn("Ping GET attempt failed, trying POST:", getErr);
+        }
       }
 
       const payload = {
@@ -160,37 +187,67 @@ async function startServer() {
         submissions: submissions || (submission ? [submission] : [])
       };
 
-      const response = await fetch(targetUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(payload),
-        redirect: "follow"
-      });
-
-      const responseText = await response.text();
+      let responseText = "";
       let parsedResponse: any = {};
       let isJson = false;
 
+      // Strategy 1: Try POST
       try {
-        parsedResponse = JSON.parse(responseText);
-        isJson = true;
-      } catch {
-        parsedResponse = { raw: responseText.slice(0, 300) };
+        const response = await fetch(targetUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "text/plain;charset=utf-8"
+          },
+          body: JSON.stringify(payload),
+          redirect: "follow"
+        });
+
+        responseText = await response.text();
+        try {
+          parsedResponse = JSON.parse(responseText);
+          isJson = true;
+        } catch {
+          isJson = false;
+        }
+      } catch (postErr) {
+        console.warn("POST to Apps Script failed, trying GET fallback:", postErr);
+      }
+
+      // Strategy 2: If POST failed or returned HTML, try GET with query parameter
+      if (!isJson) {
+        try {
+          const encodedPayload = encodeURIComponent(JSON.stringify(payload));
+          const getUrl = `${targetUrl}${targetUrl.includes("?") ? "&" : "?"}data=${encodedPayload}`;
+          const getRes = await fetch(getUrl, {
+            method: "GET",
+            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+            redirect: "follow"
+          });
+          const getTxt = await getRes.text();
+          try {
+            parsedResponse = JSON.parse(getTxt);
+            isJson = true;
+            responseText = getTxt;
+          } catch {
+            isJson = false;
+          }
+        } catch (getErr) {
+          console.warn("GET fallback failed:", getErr);
+        }
       }
 
       // Check if Google returned an HTML error page (e.g. 404, authorization needed, etc.)
       const isHtmlResponse =
-        responseText.toLowerCase().includes("<!doctype") ||
-        responseText.toLowerCase().includes("<html") ||
-        responseText.toLowerCase().includes("the page cannot be found") ||
-        responseText.toLowerCase().includes("the page could not be loaded");
+        !isJson &&
+        (responseText.toLowerCase().includes("<!doctype") ||
+          responseText.toLowerCase().includes("<html") ||
+          responseText.toLowerCase().includes("the page cannot be found") ||
+          responseText.toLowerCase().includes("the page could not be loaded"));
 
-      if (isHtmlResponse || (!response.ok && !isJson)) {
+      if (isHtmlResponse || !isJson) {
         return res.json({
           success: false,
-          message: "Google Apps Script mengembalikan halaman HTML. Pastikan Web App di-Deploy dengan setelan: 'Execute as: Me' dan 'Who has access: Anyone' agar dapat diakses oleh aplikasi."
+          message: "Google Apps Script mengembalikan halaman HTML. Silakan salin Kode Apps Script V3.0 terbaru di menu Apps Script, simpan di Google Sheet, lalu Deploy Versi Baru (Siapa Saja / Anyone)."
         });
       }
 
