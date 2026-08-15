@@ -24,6 +24,7 @@ interface HeaderProps {
   onOpenAppsScript: () => void;
   activeMonthNum: number;
   onChangeActiveMonth: (monthNum: number) => void;
+  webAppUrl?: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -37,7 +38,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenPrintReport,
   onOpenAppsScript,
   activeMonthNum,
-  onChangeActiveMonth
+  onChangeActiveMonth,
+  webAppUrl = ""
 }) => {
   return (
     <header className="bg-gradient-to-r from-[#0A1C3E] via-[#0F2C6E] to-[#1E52D0] text-white border-b-2 border-amber-400 shadow-xl relative overflow-hidden">
@@ -137,11 +139,19 @@ export const Header: React.FC<HeaderProps> = ({
             {/* Google Apps Script Button */}
             <button
               onClick={onOpenAppsScript}
-              className="inline-flex items-center px-3 py-1.5 border border-emerald-400/50 rounded-xl text-xs font-bold bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 transition-all shadow-xs cursor-pointer"
-              title="Lihat & Salin Google Apps Script untuk Otomatisasi Sheets"
+              className={`inline-flex items-center px-3 py-1.5 border rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer ${
+                webAppUrl
+                  ? "bg-emerald-500/20 text-emerald-300 border-emerald-400/50 hover:bg-emerald-500/30"
+                  : "bg-amber-400/20 text-amber-300 border-amber-400/50 hover:bg-amber-400/30"
+              }`}
+              title={
+                webAppUrl
+                  ? "Webhook Google Apps Script Aktif - Klik untuk kelola sinkronisasi"
+                  : "Webhook Belum Terhubung - Klik untuk sambungkan ke Google Sheet"
+              }
             >
-              <FileCode className="w-3.5 h-3.5 mr-1.5 text-emerald-300" />
-              <span>Apps Script</span>
+              <FileCode className={`w-3.5 h-3.5 mr-1.5 ${webAppUrl ? "text-emerald-300" : "text-amber-300"}`} />
+              <span>{webAppUrl ? "🟢 Webhook Sheet" : "⚠️ Sambung Sheet"}</span>
             </button>
 
             {/* Printable Report */}

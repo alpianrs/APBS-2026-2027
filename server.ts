@@ -5,12 +5,14 @@ import dotenv from "dotenv";
 import {
   DEFAULT_PUBLISHED_URL,
   getCandidateCsvUrls,
-  parseApbsCsvText
+  parseApbsCsvText,
+  parseLpjCsvText
 } from "./src/lib/sheetParser.js";
 
 dotenv.config();
 
 const DEFAULT_SHEET_ID = "1Eg8UBRpKMufAtvl6EZqDSvlIFFhVc--EZFzCHHHRn8M";
+const DEFAULT_LPJ_GID = "1399834495";
 
 async function startServer() {
   const app = express();
@@ -93,13 +95,115 @@ async function startServer() {
   app.get("/api/apbs-data", handleApbsDataRequest);
   app.get("/api/apbs-data/*", handleApbsDataRequest);
 
-  app.post("/api/delete-submission", (req, res) => {
-    const { subId, pin } = req.body;
+  // API Route: Fetch live LPJ Log from Google Sheet tab LOG_PENGAJUAN_LPJ
+  app.get("/api/lpj-data", async (req, res) => {
+    try {
+      const rawInput = (req.query.sheetId as string) || DEFAULT_SHEET_ID;
+      const cleanMatch = rawInput.match(/\/d\/([a-zA-Z0-9-_]{20,})/);
+      const sheetId = cleanMatch ? cleanMatch[1] : (rawInput.includes("/") ? DEFAULT_SHEET_ID : rawInput);
+      const gid = (req.query.gid as string) || DEFAULT_LPJ_GID;
+
+      const lpjUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}`;
+      const response = await fetch(lpjUrl, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+        redirect: "follow"
+      });
+
+      if (!response.ok) {
+        return res.json({ success: true, submissions: [] });
+      }
+
+      const csvText = await response.text();
+      if (csvText.startsWith("<!DOCTYPE") || csvText.startsWith("<html")) {
+        return res.json({ success: true, submissions: [] });
+      }
+
+      const submissions = parseLpjCsvText(csvText);
+      res.json({
+        success: true,
+        submissions,
+        total: submissions.length
+      });
+    } catch (error: any) {
+      console.error("Error fetching LPJ data:", error);
+      res.json({ success: true, submissions: [], error: error.message });
+    }
+  });
+
+  // API Route: Sync single submission or batch to Google Apps Script Web App
+  app.post("/api/sync-submission", async (req, res) => {
+    try {
+      const { webAppUrl, submission, submissions, action = "save", pin } = req.body;
+      const targetUrl = webAppUrl || process.env.APPS_SCRIPT_URL;
+
+      if (!targetUrl || !targetUrl.startsWith("http")) {
+        return res.json({
+          success: false,
+          reason: "NO_WEBHOOK_URL",
+          message: "Google Apps Script Web App URL belum diatur. Silakan masukkan Web App URL di menu Apps Script."
+        });
+      }
+
+      const payload = {
+        action,
+        pin,
+        ...(submission ? submission : {}),
+        submissions: submissions || (submission ? [submission] : [])
+      };
+
+      const response = await fetch(targetUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload),
+        redirect: "follow"
+      });
+
+      const responseText = await response.text();
+      let parsedResponse: any = {};
+      try {
+        parsedResponse = JSON.parse(responseText);
+      } catch {
+        parsedResponse = { text: responseText };
+      }
+
+      res.json({
+        success: true,
+        targetUrl,
+        result: parsedResponse,
+        message: "Data berhasil dikirim ke Google Apps Script Spreadsheet!"
+      });
+    } catch (error: any) {
+      console.error("Error syncing to Google Apps Script:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Gagal menghubungi Webhook Google Apps Script"
+      });
+    }
+  });
+
+  app.post("/api/delete-submission", async (req, res) => {
+    const { subId, pin, webAppUrl } = req.body;
     if (pin !== "123") {
       return res.status(403).json({
         success: false,
         error: "PIN Otorisasi Salah! Gunakan PIN 123."
       });
+    }
+
+    const targetUrl = webAppUrl || process.env.APPS_SCRIPT_URL;
+    if (targetUrl && targetUrl.startsWith("http")) {
+      try {
+        await fetch(targetUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "delete", subId, pin: "123" }),
+          redirect: "follow"
+        });
+      } catch (err) {
+        console.warn("Failed forwarding delete to Apps Script Webhook:", err);
+      }
     }
 
     console.log(`[DELETE ACTION] Submission ID ${subId} deleted with verified PIN 123.`);

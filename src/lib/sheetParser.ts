@@ -1,4 +1,4 @@
-import { ApbsItem } from "../types";
+import { ApbsItem, ApbsSubmission } from "../types";
 
 export const DEFAULT_SHEET_ID = "1Eg8UBRpKMufAtvl6EZqDSvlIFFhVc--EZFzCHHHRn8M";
 export const DEFAULT_PUBLISHED_URL =
@@ -78,6 +78,78 @@ export function parseRow(str: string): string[] {
   }
   row.push(field.trim());
   return row;
+}
+
+export const parseNum = (val: string): number => {
+  if (!val) return 0;
+  const cleaned = val.replace(/Rp|\.|\s/g, "").replace(",", ".");
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? 0 : n;
+};
+
+export function parseLpjCsvText(csvText: string, apbsItems: ApbsItem[] = []): ApbsSubmission[] {
+  const lines = csvText.split("\n");
+  if (lines.length <= 1) return [];
+
+  const submissions: ApbsSubmission[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const row = parseRow(lines[i]);
+    if (!row || row.length < 5) continue;
+
+    const id = row[0] || `sub-sheet-${i}`;
+    const tanggalPengajuan = row[1] || "";
+    const monthNum = parseInt(row[2]) || 7;
+    const rek = row[3] || "";
+    const itemName = row[4] || "";
+    const nominalPengajuan = parseNum(row[5] || "0");
+    const nominalRealisasi = parseNum(row[6] || "0");
+    const statusLpj = (row[8] || "").toUpperCase();
+    const noSpkOrKwitansi = row[9] || "";
+    const purchaseInfo = row[10] || "";
+    const catatan = row[11] || "";
+    const statusTransaksi = (row[12] || "AKTIF").toUpperCase();
+
+    // If marked as deleted with PIN, skip it
+    if (statusTransaksi.includes("DIHAPUS")) {
+      continue;
+    }
+
+    // Match with apbsItems
+    let matchedItemId = "";
+    if (apbsItems.length > 0) {
+      const match = apbsItems.find(
+        (it) => (rek && it.rek === rek) || (itemName && it.name.trim().toLowerCase() === itemName.trim().toLowerCase())
+      );
+      if (match) {
+        matchedItemId = match.id;
+      }
+    }
+
+    let purchaseItems = [];
+    if (purchaseInfo && purchaseInfo.startsWith("[")) {
+      try {
+        purchaseItems = JSON.parse(purchaseInfo);
+      } catch {
+        purchaseItems = [];
+      }
+    }
+
+    submissions.push({
+      id,
+      itemId: matchedItemId || (rek ? `rek-${rek}` : `item-${i}`),
+      monthNum,
+      nominalPengajuan,
+      nominalRealisasi,
+      tanggalPengajuan,
+      isReported: statusLpj.includes("SUDAH") || nominalRealisasi > 0,
+      noSpkOrKwitansi,
+      catatan,
+      purchaseItems
+    });
+  }
+
+  return submissions;
 }
 
 export function parseApbsCsvText(csvText: string, rawInput: string): ParsedSheetData {

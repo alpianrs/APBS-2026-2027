@@ -17,11 +17,20 @@ import { LazuardiLogo } from "./components/LazuardiLogo";
 import { ApbsItem, ApbsSubmission, ApbsStatusType, ApbsRecapItem } from "./types";
 import { calculateApbsRecap, computeApbsSummary } from "./lib/apbsCalculations";
 import { LAZUARDI_MONTHS, getCurrentSchoolMonth, getMonthInfo } from "./lib/constants";
-import { INITIAL_SUBMISSIONS_SAMPLE } from "./lib/initialSubmissions";
 import { fetchDirectCsvData } from "./lib/sheetParser";
-import { RefreshCw, AlertCircle, Settings } from "lucide-react";
+import {
+  RefreshCw,
+  AlertCircle,
+  CheckCircle2,
+  AlertTriangle,
+  Send,
+  X,
+  ExternalLink,
+  FileCode
+} from "lucide-react";
 
 const STORAGE_KEY_SUBMISSIONS = "lazuardi_apbs_submissions_v1";
+const STORAGE_KEY_WEBHOOK = "lazuardi_apbs_apps_script_url";
 const DEFAULT_SHEET_ID = "1Eg8UBRpKMufAtvl6EZqDSvlIFFhVc--EZFzCHHHRn8M";
 
 export default function App() {
@@ -38,6 +47,14 @@ export default function App() {
     }
   });
 
+  const [webAppUrl, setWebAppUrl] = useState<string>(() => {
+    try {
+      return localStorage.getItem(STORAGE_KEY_WEBHOOK) || "";
+    } catch {
+      return "";
+    }
+  });
+
   const [items, setItems] = useState<ApbsItem[]>([]);
   const [units, setUnits] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -45,13 +62,32 @@ export default function App() {
   const [error, setError] = useState<string>("");
   const [isSheetIdModalOpen, setIsSheetIdModalOpen] = useState<boolean>(false);
 
-  // Submissions state (stored in localStorage, clean default)
+  // Sync notification toast state
+  const [syncToast, setSyncToast] = useState<{
+    type: "success" | "warn" | "error";
+    message: string;
+    actionLabel?: string;
+    onAction?: () => void;
+  } | null>(null);
+
+  const showToast = (
+    type: "success" | "warn" | "error",
+    message: string,
+    actionLabel?: string,
+    onAction?: () => void
+  ) => {
+    setSyncToast({ type, message, actionLabel, onAction });
+    setTimeout(() => {
+      setSyncToast((current) => (current?.message === message ? null : current));
+    }, 7000);
+  };
+
+  // Submissions state (stored in localStorage)
   const [submissions, setSubmissions] = useState<ApbsSubmission[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_SUBMISSIONS);
       if (saved) {
         const parsed = JSON.parse(saved);
-        // If saved data is just the dummy initial sample, reset to []
         if (Array.isArray(parsed) && parsed.some((s: any) => s.id === "sub-1" || s.id === "sub-2")) {
           localStorage.removeItem(STORAGE_KEY_SUBMISSIONS);
           return [];
@@ -89,6 +125,7 @@ export default function App() {
   const [isAppsScriptModalOpen, setIsAppsScriptModalOpen] = useState<boolean>(false);
   const [isPinModalOpen, setIsPinModalOpen] = useState<boolean>(false);
   const [pendingDeleteSubId, setPendingDeleteSubId] = useState<string | null>(null);
+  const [isSyncingAll, setIsSyncingAll] = useState<boolean>(false);
 
   // Save submissions to localStorage
   useEffect(() => {
@@ -99,19 +136,132 @@ export default function App() {
     }
   }, [submissions]);
 
-  // Fetch Google Sheet data from server endpoint with direct client fallback
+  const handleSaveWebAppUrl = (url: string) => {
+    setWebAppUrl(url);
+    try {
+      localStorage.setItem(STORAGE_KEY_WEBHOOK, url);
+    } catch {}
+    if (url) {
+      showToast("success", "✅ URL Webhook Google Apps Script berhasil disimpan & terhubung!");
+    }
+  };
+
+  // Helper to sync single submission to Google Apps Script Web App
+  const syncSubmissionToGoogleSheet = async (sub: ApbsSubmission, action: "save" | "delete" = "save") => {
+    const targetItem = items.find((it) => it.id === sub.itemId);
+    const payload = {
+      webAppUrl,
+      action,
+      id: sub.id,
+      tanggalPengajuan: sub.tanggalPengajuan,
+      monthNum: sub.monthNum,
+      rek: targetItem?.rek || "-",
+      itemName: targetItem?.name || "-",
+      nominalPengajuan: sub.nominalPengajuan,
+      nominalRealisasi: sub.nominalRealisasi,
+      isReported: sub.isReported || sub.nominalRealisasi > 0,
+      noSpkOrKwitansi: sub.noSpkOrKwitansi || "-",
+      purchaseItems: sub.purchaseItems || [],
+      catatan: sub.catatan || sub.submittedBy || "-"
+    };
+
+    try {
+      const res = await fetch("/api/sync-submission", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast("success", "✅ Pengajuan berhasil dicatat ke tab LOG_PENGAJUAN_LPJ di Google Sheet!");
+      } else if (data.reason === "NO_WEBHOOK_URL") {
+        showToast(
+          "warn",
+          "💾 Pengajuan tersimpan di aplikasi. Hubungkan URL Webhook Google Apps Script untuk otomatis mencatat ke Google Sheet.",
+          "Sambungkan Sekarang",
+          () => setIsAppsScriptModalOpen(true)
+        );
+      } else {
+        showToast("error", `⚠️ Respon Google Apps Script: ${data.message || "Gagal sinkron"}`);
+      }
+    } catch (err: any) {
+      console.warn("Sync submission error:", err);
+    }
+  };
+
+  // Helper to sync all local submissions to Google Apps Script Web App in one click
+  const handleSyncAllSubmissions = async () => {
+    if (!webAppUrl) {
+      showToast(
+        "warn",
+        "Masukkan URL Web App Google Apps Script terlebih dahulu untuk memulai sinkronisasi.",
+        "Buka Pengaturan Apps Script",
+        () => setIsAppsScriptModalOpen(true)
+      );
+      return;
+    }
+
+    setIsSyncingAll(true);
+    try {
+      const preparedList = submissions.map((sub) => {
+        const targetItem = items.find((it) => it.id === sub.itemId);
+        return {
+          id: sub.id,
+          tanggalPengajuan: sub.tanggalPengajuan,
+          monthNum: sub.monthNum,
+          rek: targetItem?.rek || "-",
+          itemName: targetItem?.name || "-",
+          nominalPengajuan: sub.nominalPengajuan,
+          nominalRealisasi: sub.nominalRealisasi,
+          isReported: sub.isReported || sub.nominalRealisasi > 0,
+          noSpkOrKwitansi: sub.noSpkOrKwitansi || "-",
+          purchaseItems: sub.purchaseItems || [],
+          catatan: sub.catatan || sub.submittedBy || "-"
+        };
+      });
+
+      const res = await fetch("/api/sync-submission", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          webAppUrl,
+          action: "sync-all",
+          submissions: preparedList
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        showToast(
+          "success",
+          `✅ Berhasil! Sebanyak ${submissions.length} data pengajuan telah dicatat ke tab LOG_PENGAJUAN_LPJ di Google Sheet!`
+        );
+      } else {
+        showToast("error", `⚠️ Gagal sinkronisasi: ${data.message || "Periksa Web App URL"}`);
+      }
+    } catch (err: any) {
+      showToast("error", `❌ Error sinkronisasi: ${err.message}`);
+    } finally {
+      setIsSyncingAll(false);
+    }
+  };
+
+  // Fetch Google Sheet data and remote LPJ tab data
   const fetchSheetData = async () => {
     setIsRefreshing(true);
     setError("");
     try {
       let loadedFromApi = false;
+      let loadedItems: ApbsItem[] = [];
+
       try {
         const res = await fetch(`/api/apbs-data?sheetId=${encodeURIComponent(sheetId)}`);
         const contentType = res.headers.get("content-type") || "";
         if (res.ok && contentType.includes("application/json")) {
           const data = await res.json();
           if (data.success) {
-            setItems(data.items || []);
+            loadedItems = data.items || [];
+            setItems(loadedItems);
             setUnits(data.units || []);
             loadedFromApi = true;
           }
@@ -121,12 +271,42 @@ export default function App() {
       }
 
       if (!loadedFromApi) {
-        // Fallback: direct browser CSV fetch and parsing
-        console.log("Loading data via direct CSV parser fallback...");
         const data = await fetchDirectCsvData(sheetId);
-        setItems(data.items || []);
+        loadedItems = data.items || [];
+        setItems(loadedItems);
         setUnits(data.units || []);
       }
+
+      // Also fetch remote submissions from LOG_PENGAJUAN_LPJ tab (gid=1399834495)
+      try {
+        const lpjRes = await fetch(`/api/lpj-data?sheetId=${encodeURIComponent(sheetId)}&gid=1399834495`);
+        if (lpjRes.ok) {
+          const lpjData = await lpjRes.json();
+          if (lpjData.success && Array.isArray(lpjData.submissions) && lpjData.submissions.length > 0) {
+            setSubmissions((prev) => {
+              const map = new Map<string, ApbsSubmission>();
+              lpjData.submissions.forEach((remoteSub: ApbsSubmission) => {
+                // If item matches
+                if (loadedItems.length > 0) {
+                  const match = loadedItems.find((it) => it.id === remoteSub.itemId);
+                  if (match) remoteSub.itemId = match.id;
+                }
+                map.set(remoteSub.id, remoteSub);
+              });
+              // Merge local items that are not yet on remote
+              prev.forEach((localSub) => {
+                if (!map.has(localSub.id)) {
+                  map.set(localSub.id, localSub);
+                }
+              });
+              return Array.from(map.values());
+            });
+          }
+        }
+      } catch (lpjErr) {
+        console.warn("Could not fetch remote LPJ log tab:", lpjErr);
+      }
+
     } catch (err: any) {
       console.error(err);
       setError(err.message || "Gagal terhubung ke Google Sheet");
@@ -223,6 +403,8 @@ export default function App() {
     setSubmissions((prev) =>
       prev.map((s) => (s.id === updatedSub.id ? updatedSub : s))
     );
+    // Real-time sync update to Google Sheet
+    syncSubmissionToGoogleSheet(updatedSub, "save");
   };
 
   const handleDeleteSubmission = (subId: string) => {
@@ -238,9 +420,14 @@ export default function App() {
       fetch("/api/delete-submission", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subId: pendingDeleteSubId, pin: "123" })
+        body: JSON.stringify({
+          subId: pendingDeleteSubId,
+          pin: "123",
+          webAppUrl
+        })
       }).catch((err) => console.error("Error calling delete endpoint:", err));
 
+      showToast("success", "🗑️ Pengajuan berhasil dihapus dari sistem & disinkronkan.");
       setPendingDeleteSubId(null);
     }
   };
@@ -248,21 +435,25 @@ export default function App() {
   const handleSaveSubmission = (
     submissionData: Omit<ApbsSubmission, "id"> & { id?: string }
   ) => {
+    let savedSub: ApbsSubmission;
+
     if (submissionData.id) {
       // Update existing
+      savedSub = { ...submissionData, id: submissionData.id } as ApbsSubmission;
       setSubmissions((prev) =>
-        prev.map((s) =>
-          s.id === submissionData.id ? { ...s, ...submissionData } : s
-        )
+        prev.map((s) => (s.id === savedSub.id ? savedSub : s))
       );
     } else {
       // Create new
-      const newSub: ApbsSubmission = {
+      savedSub = {
         ...submissionData,
         id: `sub-${Date.now()}`
       };
-      setSubmissions((prev) => [newSub, ...prev]);
+      setSubmissions((prev) => [savedSub, ...prev]);
     }
+
+    // Immediately sync to Google Sheets via Webhook
+    syncSubmissionToGoogleSheet(savedSub, "save");
   };
 
   const handleResetFilters = () => {
@@ -290,7 +481,51 @@ export default function App() {
         onOpenAppsScript={() => setIsAppsScriptModalOpen(true)}
         activeMonthNum={activeMonthNum}
         onChangeActiveMonth={(m) => setActiveMonthNum(m)}
+        webAppUrl={webAppUrl}
       />
+
+      {/* Floating Sync Toast Notification Banner */}
+      {syncToast && (
+        <div className="fixed top-20 right-4 z-50 max-w-md w-full animate-in slide-in-from-top duration-300">
+          <div className={`p-4 rounded-2xl shadow-xl border flex items-start space-x-3 backdrop-blur-md ${
+            syncToast.type === "success"
+              ? "bg-emerald-950/90 text-emerald-100 border-emerald-500"
+              : syncToast.type === "warn"
+              ? "bg-[#0A1C3E]/95 text-amber-200 border-amber-400"
+              : "bg-rose-950/90 text-rose-100 border-rose-500"
+          }`}>
+            {syncToast.type === "success" ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+            ) : syncToast.type === "warn" ? (
+              <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+            ) : (
+              <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+            )}
+            
+            <div className="flex-1 text-xs space-y-2">
+              <p className="font-semibold leading-relaxed">{syncToast.message}</p>
+              {syncToast.actionLabel && syncToast.onAction && (
+                <button
+                  onClick={() => {
+                    syncToast.onAction?.();
+                    setSyncToast(null);
+                  }}
+                  className="px-3 py-1 bg-amber-400 text-slate-950 font-black rounded-lg text-[11px] shadow hover:bg-amber-300 transition-colors cursor-pointer"
+                >
+                  {syncToast.actionLabel}
+                </button>
+              )}
+            </div>
+
+            <button
+              onClick={() => setSyncToast(null)}
+              className="text-slate-400 hover:text-white p-1 transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
         
@@ -318,53 +553,59 @@ export default function App() {
               <h3 className="font-bold text-sm text-rose-950 flex items-center justify-between">
                 <span>Gagal Mengambil Data Google Sheet APBS</span>
                 <button
-                  onClick={() => setIsSheetIdModalOpen(true)}
-                  className="px-3 py-1 bg-white border border-rose-300 text-rose-900 hover:bg-rose-100 rounded-lg text-xs font-bold transition-all shadow-2xs"
+                  onClick={fetchSheetData}
+                  className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition-colors"
                 >
-                  Ganti Link / ID Sheet
+                  Coba Lagi
                 </button>
               </h3>
-
-              <div className="text-xs whitespace-pre-line leading-relaxed text-rose-900 font-medium bg-white/70 p-3.5 rounded-xl border border-rose-200/80">
+              <p className="text-xs text-rose-800 whitespace-pre-line leading-relaxed font-mono bg-rose-100/70 p-3 rounded-xl border border-rose-200">
                 {error}
-              </div>
-
-              <div className="flex items-center space-x-3 pt-1">
-                <button
-                  onClick={fetchSheetData}
-                  className="px-4 py-2 bg-rose-600 text-white rounded-xl text-xs font-bold hover:bg-rose-700 transition-colors shadow-xs"
-                >
-                  Coba Sinkronisasi Ulang
-                </button>
+              </p>
+              <div className="flex space-x-2 pt-1">
                 <button
                   onClick={() => setIsSheetIdModalOpen(true)}
-                  className="px-4 py-2 bg-slate-900 text-amber-300 rounded-xl text-xs font-bold hover:bg-slate-800 transition-colors shadow-xs"
+                  className="px-4 py-2 bg-[#0F2C59] hover:bg-[#1E3A8A] text-white text-xs font-bold rounded-xl transition-all shadow-xs"
                 >
-                  Panduan & Masukkan URL Sheet
+                  Ganti Link Google Sheet
                 </button>
+                <a
+                  href={`https://docs.google.com/spreadsheets/d/${sheetId}/edit?usp=sharing`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-4 py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl transition-all"
+                >
+                  Buka di Google Sheets
+                </a>
               </div>
             </div>
           </div>
         ) : (
-          <>
-            {/* KPI Metrics Cards */}
+          <div className="space-y-6">
+            
+            {/* Top Reminder Banner for Overdue / Due APBS Items */}
+            <MonthlyReminderBanner
+              activeMonthNum={activeMonthNum}
+              overdueItems={overdueItems}
+              dueThisMonthItems={dueThisMonthItems}
+              onOpenSubmissionForItem={handleOpenSubmissionForItem}
+            />
+
+            {/* Top Summary Metrics Cards */}
             <MetricsCards
               summary={summaryMetrics}
               activeMonthName={activeMonthInfo.name}
             />
 
-            {/* Overdue / Due Reminders */}
-            <MonthlyReminderBanner
-              overdueItems={overdueItems}
-              dueThisMonthItems={dueThisMonthItems}
-              currentMonthName={activeMonthInfo.name}
-              onOpenSubmissionForItem={handleOpenSubmissionForItem}
-            />
+            {/* Optional Visual Analysis Charts */}
+            {showCharts && (
+              <ApbsCharts
+                recapItems={allRecapItems}
+                activeMonthNum={activeMonthNum}
+              />
+            )}
 
-            {/* Visual Charts Toggle Area */}
-            {showCharts && <ApbsCharts recapItems={filteredRecapItems} />}
-
-            {/* Filter & Search Bar */}
+            {/* Filter and Search Bar */}
             <FilterBar
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
@@ -375,28 +616,36 @@ export default function App() {
               selectedStatus={selectedStatus}
               onStatusChange={setSelectedStatus}
               units={units}
-              totalResults={filteredRecapItems.length}
               onResetFilters={handleResetFilters}
+              totalFilteredCount={filteredRecapItems.length}
+              totalAllCount={items.length}
             />
 
-            {/* Primary Rekap APBS Table */}
+            {/* Main Interactive Table */}
             <ApbsTable
               recapItems={filteredRecapItems}
+              activeMonthNum={activeMonthNum}
+              selectedMonthFilter={selectedMonthFilter}
               onOpenSubmissionForItem={handleOpenSubmissionForItem}
-              onOpenReportModal={handleOpenReportModal}
-              onOpenPurchaseDetailModal={handleOpenPurchaseDetailModal}
               onEditSubmission={handleEditSubmission}
+              onOpenReportModal={handleOpenReportModal}
+              onOpenPurchaseDetails={handleOpenPurchaseDetailModal}
               onDeleteSubmission={handleDeleteSubmission}
             />
-          </>
+
+          </div>
         )}
 
       </main>
 
-      {/* Submission Modal */}
+      {/* Submission Modal (Pengajuan Baru / Edit) */}
       <SubmissionModal
         isOpen={isSubmissionModalOpen}
-        onClose={() => setIsSubmissionModalOpen(false)}
+        onClose={() => {
+          setIsSubmissionModalOpen(false);
+          setEditSubmission(null);
+          setPreselectedRecapItem(null);
+        }}
         items={items}
         preselectedRecapItem={preselectedRecapItem}
         editSubmission={editSubmission}
@@ -435,6 +684,12 @@ export default function App() {
         isOpen={isAppsScriptModalOpen}
         onClose={() => setIsAppsScriptModalOpen(false)}
         sheetId={sheetId}
+        submissions={submissions}
+        items={items}
+        webAppUrl={webAppUrl}
+        onSaveWebAppUrl={handleSaveWebAppUrl}
+        onSyncAll={handleSyncAllSubmissions}
+        isSyncing={isSyncingAll}
       />
 
       {/* Pin Access Security Modal */}
