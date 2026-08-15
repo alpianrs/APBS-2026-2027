@@ -12,6 +12,7 @@ import { PinModal } from "./components/PinModal";
 import { ApbsCharts } from "./components/ApbsCharts";
 import { ExportPrintReport } from "./components/ExportPrintReport";
 import { SheetIdModal } from "./components/SheetIdModal";
+import { LazuardiLogo } from "./components/LazuardiLogo";
 
 import { ApbsItem, ApbsSubmission, ApbsStatusType, ApbsRecapItem } from "./types";
 import { calculateApbsRecap, computeApbsSummary } from "./lib/apbsCalculations";
@@ -21,12 +22,17 @@ import { fetchDirectCsvData } from "./lib/sheetParser";
 import { RefreshCw, AlertCircle, Settings } from "lucide-react";
 
 const STORAGE_KEY_SUBMISSIONS = "lazuardi_apbs_submissions_v1";
-const DEFAULT_SHEET_ID = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTJVTzm62WYEDOahWZz0-6hvMDxS87MtDVsk2Hd4tFMfI8FWnZcK6eW3yYqa9iprImukVV11-T6p5ry/pub?output=csv";
+const DEFAULT_SHEET_ID = "1Eg8UBRpKMufAtvl6EZqDSvlIFFhVc--EZFzCHHHRn8M";
 
 export default function App() {
   const [sheetId, setSheetId] = useState<string>(() => {
     try {
-      return localStorage.getItem("lazuardi_apbs_sheet_id") || DEFAULT_SHEET_ID;
+      const saved = localStorage.getItem("lazuardi_apbs_sheet_id");
+      if (!saved || saved.includes("2PACX-1vTJVTzm62WYEDOahWZz0-6hvMDxS87MtDVsk2Hd4tFMfI8FWnZcK6eW3yYqa9iprImukVV11-T6p5ry")) {
+        localStorage.setItem("lazuardi_apbs_sheet_id", DEFAULT_SHEET_ID);
+        return DEFAULT_SHEET_ID;
+      }
+      return saved;
     } catch {
       return DEFAULT_SHEET_ID;
     }
@@ -291,13 +297,17 @@ export default function App() {
         {/* Loading State */}
         {loading ? (
           <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 shadow-sm my-8 flex flex-col items-center justify-center space-y-4">
-            <RefreshCw className="w-10 h-10 text-emerald-700 animate-spin" />
+            <LazuardiLogo variant="shield" size="xl" />
+            <div className="flex items-center space-x-2 text-[#1855C6]">
+              <RefreshCw className="w-5 h-5 animate-spin" />
+              <span className="font-bold text-sm">Menghubungkan ke Spreadsheet Google Sheet...</span>
+            </div>
             <div className="space-y-1">
-              <h3 className="text-base font-bold text-slate-800">
-                Membaca & Memproses Data Google Sheet APBS Lazuardi...
+              <h3 className="text-base font-extrabold text-slate-800">
+                Memproses Data APBS Lazuardi
               </h3>
               <p className="text-xs text-slate-500">
-                Menghubungkan ke Spreadsheet: {sheetId.slice(0, 20)}...
+                Spreadsheet ID: {sheetId.slice(0, 25)}...
               </p>
             </div>
           </div>

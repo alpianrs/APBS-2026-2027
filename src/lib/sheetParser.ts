@@ -1,7 +1,8 @@
 import { ApbsItem } from "../types";
 
+export const DEFAULT_SHEET_ID = "1Eg8UBRpKMufAtvl6EZqDSvlIFFhVc--EZFzCHHHRn8M";
 export const DEFAULT_PUBLISHED_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTJVTzm62WYEDOahWZz0-6hvMDxS87MtDVsk2Hd4tFMfI8FWnZcK6eW3yYqa9iprImukVV11-T6p5ry/pub?output=csv";
+  `https://docs.google.com/spreadsheets/d/${DEFAULT_SHEET_ID}/gviz/tq?tqx=out:csv`;
 
 export interface ParsedSheetData {
   sheetId: string;
@@ -15,13 +16,6 @@ export interface ParsedSheetData {
 export function getCandidateCsvUrls(inputUrlOrId: string): string[] {
   const str = (inputUrlOrId || "").trim();
   const candidateUrls: string[] = [];
-
-  if (str.startsWith("http://") || str.startsWith("https://")) {
-    candidateUrls.push(str);
-    if (str.includes("/pub") && !str.includes("output=csv")) {
-      candidateUrls.push(str + (str.includes("?") ? "&output=csv" : "?output=csv"));
-    }
-  }
 
   let gid: string | null = null;
   const gidMatch = str.match(/[?&#]gid=([0-9]+)/);
@@ -42,6 +36,14 @@ export function getCandidateCsvUrls(inputUrlOrId: string): string[] {
       `https://docs.google.com/spreadsheets/d/${cleanId}/export?format=csv${gidQuery}`,
       `https://docs.google.com/spreadsheets/d/${cleanId}/pub?output=csv${gidQuery}`
     );
+  }
+
+  if (str.startsWith("http://") || str.startsWith("https://")) {
+    if (str.includes("/pub") && !candidateUrls.includes(str)) {
+      candidateUrls.unshift(str + (str.includes("output=csv") ? "" : (str.includes("?") ? "&output=csv" : "?output=csv")));
+    } else if (!candidateUrls.includes(str)) {
+      candidateUrls.push(str);
+    }
   }
 
   if (!candidateUrls.includes(DEFAULT_PUBLISHED_URL)) {

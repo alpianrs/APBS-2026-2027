@@ -2,6 +2,7 @@ import React from "react";
 import { X, Printer, Download, FileSpreadsheet } from "lucide-react";
 import { ApbsRecapItem, ApbsSummaryData } from "../types";
 import { formatRupiah } from "../lib/constants";
+import { LazuardiLogo } from "./LazuardiLogo";
 
 interface ExportPrintReportProps {
   isOpen: boolean;
@@ -104,21 +105,24 @@ export const ExportPrintReport: React.FC<ExportPrintReportProps> = ({
         <div className="p-8 space-y-6 text-slate-900 font-sans text-xs print:p-4">
           
           {/* Official Letterhead Header */}
-          <div className="border-b-2 border-slate-900 pb-4 flex justify-between items-start">
-            <div>
-              <h2 className="text-xl font-extrabold text-slate-950 uppercase tracking-tight">
-                LAZUARDI GLOBAL COMPASSIONATE SCHOOL
-              </h2>
-              <p className="text-xs text-slate-600 font-medium">
-                Laporan Monitoring Rekapitulasi APBS & Penggunaan Anggaran Sekolah
-              </p>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Bulan Laporan: <strong>{activeMonthName}</strong> | Cetak: {new Date().toLocaleDateString("id-ID")}
-              </p>
+          <div className="border-b-2 border-[#0A1C3E] pb-4 flex justify-between items-center">
+            <div className="flex items-center space-x-4">
+              <LazuardiLogo size="md" lightText={false} subtitle="GCS Cinere" />
+              <div className="border-l-2 border-slate-300 pl-4">
+                <h2 className="text-base font-extrabold text-[#0A1C3E] uppercase tracking-tight">
+                  LAZUARDI GLOBAL COMPASSIONATE SCHOOL
+                </h2>
+                <p className="text-xs text-slate-600 font-medium">
+                  Laporan Monitoring Rekapitulasi APBS & Penggunaan Anggaran
+                </p>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Bulan Laporan: <strong className="text-[#1E52D0]">{activeMonthName}</strong> | Dicetak: {new Date().toLocaleDateString("id-ID")}
+                </p>
+              </div>
             </div>
             <div className="text-right">
-              <div className="inline-block px-3 py-1 rounded bg-slate-100 border border-slate-300 font-bold text-slate-800 text-xs">
-                SISTEM APBS LAZUARDI
+              <div className="inline-block px-3 py-1.5 rounded-lg bg-blue-50 border border-blue-200 font-bold text-[#1E52D0] text-xs shadow-xs">
+                FACILITY MANAGEMENT
               </div>
             </div>
           </div>
