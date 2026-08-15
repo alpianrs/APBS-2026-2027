@@ -15,6 +15,7 @@ import {
   ExternalLink
 } from "lucide-react";
 import { ApbsSubmission, ApbsItem } from "../types";
+import { executeAppsScriptSync } from "../lib/syncService";
 
 interface AppsScriptModalProps {
   isOpen: boolean;
@@ -293,26 +294,10 @@ function testWebhook() {
     setTestMessage("Menguji koneksi ke Google Apps Script Web App...");
 
     try {
-      const res = await fetch("/api/sync-submission", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          webAppUrl: url,
-          action: "ping",
-          submissions: []
-        })
+      const data = await executeAppsScriptSync({
+        webAppUrl: url,
+        action: "ping"
       });
-
-      const responseText = await res.text();
-      let data: any = {};
-      try {
-        data = JSON.parse(responseText);
-      } catch {
-        data = {
-          success: false,
-          message: "Respon bukan format JSON. Pastikan Web App di-Deploy dengan hak akses 'Anyone' (Siapa saja)."
-        };
-      }
 
       if (data.success) {
         setTestStatus("success");

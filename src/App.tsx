@@ -18,6 +18,7 @@ import { ApbsItem, ApbsSubmission, ApbsStatusType, ApbsRecapItem } from "./types
 import { calculateApbsRecap, computeApbsSummary } from "./lib/apbsCalculations";
 import { LAZUARDI_MONTHS, getCurrentSchoolMonth, getMonthInfo } from "./lib/constants";
 import { fetchDirectCsvData } from "./lib/sheetParser";
+import { executeAppsScriptSync } from "./lib/syncService";
 import {
   RefreshCw,
   AlertCircle,
@@ -176,29 +177,10 @@ export default function App() {
     };
 
     try {
-      const res = await fetch("/api/sync-submission", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-
-      const responseText = await res.text();
-      let data: any = {};
-      try {
-        data = JSON.parse(responseText);
-      } catch {
-        data = { success: false, message: "Gagal membaca format data respon server." };
-      }
+      const data = await executeAppsScriptSync(payload);
 
       if (data.success) {
         showToast("success", "✅ Pengajuan berhasil dicatat ke tab LOG_PENGAJUAN_LPJ di Google Sheet!");
-      } else if (data.reason === "NO_WEBHOOK_URL") {
-        showToast(
-          "warn",
-          "💾 Pengajuan tersimpan di aplikasi. Hubungkan URL Webhook Google Apps Script untuk otomatis mencatat ke Google Sheet.",
-          "Sambungkan Sekarang",
-          () => setIsAppsScriptModalOpen(true)
-        );
       } else {
         showToast("error", `⚠️ Respon Google Apps Script: ${data.message || "Gagal sinkron"}`);
       }
@@ -238,23 +220,11 @@ export default function App() {
         };
       });
 
-      const res = await fetch("/api/sync-submission", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          webAppUrl,
-          action: "sync-all",
-          submissions: preparedList
-        })
+      const data = await executeAppsScriptSync({
+        webAppUrl,
+        action: "sync-all",
+        submissions: preparedList
       });
-
-      const responseText = await res.text();
-      let data: any = {};
-      try {
-        data = JSON.parse(responseText);
-      } catch {
-        data = { success: false, message: "Gagal memproses respon server." };
-      }
 
       if (data.success) {
         showToast(
@@ -439,18 +409,18 @@ export default function App() {
 
   const handleConfirmDelete = () => {
     if (pendingDeleteSubId) {
-      setSubmissions((prev) => prev.filter((s) => s.id !== pendingDeleteSubId));
+      const deletedId = pendingDeleteSubId;
+      setSubmissions((prev) => prev.filter((s) => s.id !== deletedId));
 
-      // Trigger deletion endpoint to log & sync with Google Sheets
-      fetch("/api/delete-submission", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subId: pendingDeleteSubId,
-          pin: "123",
-          webAppUrl
-        })
-      }).catch((err) => console.error("Error calling delete endpoint:", err));
+      // Trigger deletion via universal sync service
+      if (webAppUrl) {
+        executeAppsScriptSync({
+          webAppUrl,
+          action: "delete",
+          subId: deletedId,
+          pin: "123"
+        }).catch((err) => console.error("Error calling delete sync:", err));
+      }
 
       showToast("success", "🗑️ Pengajuan berhasil dihapus dari sistem & disinkronkan.");
       setPendingDeleteSubId(null);
