@@ -9,6 +9,7 @@ import { ReportModal } from "./components/ReportModal";
 import { PurchaseItemsDetailModal } from "./components/PurchaseItemsDetailModal";
 import { AppsScriptModal } from "./components/AppsScriptModal";
 import { PinModal } from "./components/PinModal";
+import { SubmissionHistoryModal } from "./components/SubmissionHistoryModal";
 import { ApbsCharts } from "./components/ApbsCharts";
 import { ExportPrintReport } from "./components/ExportPrintReport";
 import { SheetIdModal } from "./components/SheetIdModal";
@@ -124,6 +125,7 @@ export default function App() {
 
   const [isPrintModalOpen, setIsPrintModalOpen] = useState<boolean>(false);
   const [isAppsScriptModalOpen, setIsAppsScriptModalOpen] = useState<boolean>(false);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState<boolean>(false);
   const [isPinModalOpen, setIsPinModalOpen] = useState<boolean>(false);
   const [pendingDeleteSubId, setPendingDeleteSubId] = useState<string | null>(null);
   const [isSyncingAll, setIsSyncingAll] = useState<boolean>(false);
@@ -474,6 +476,8 @@ export default function App() {
         showCharts={showCharts}
         onOpenPrintReport={() => setIsPrintModalOpen(true)}
         onOpenAppsScript={() => setIsAppsScriptModalOpen(true)}
+        onOpenHistory={() => setIsHistoryModalOpen(true)}
+        submissionCount={submissions.length}
         activeMonthNum={activeMonthNum}
         onChangeActiveMonth={(m) => setActiveMonthNum(m)}
         webAppUrl={webAppUrl}
@@ -685,6 +689,18 @@ export default function App() {
         onSaveWebAppUrl={handleSaveWebAppUrl}
         onSyncAll={handleSyncAllSubmissions}
         isSyncing={isSyncingAll}
+      />
+
+      {/* Submission History / Delete Manager Modal */}
+      <SubmissionHistoryModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
+        submissions={submissions}
+        items={items}
+        onEditSubmission={handleEditSubmission}
+        onDeleteSubmission={handleDeleteSubmission}
+        onOpenReportModal={handleOpenReportModal}
+        onOpenPurchaseDetailModal={handleOpenPurchaseDetailModal}
       />
 
       {/* Pin Access Security Modal */}

@@ -7,7 +7,8 @@ import {
   Printer,
   Calendar,
   FileCode,
-  ShieldCheck
+  ShieldCheck,
+  History
 } from "lucide-react";
 import { LAZUARDI_MONTHS } from "../lib/constants";
 import { LazuardiLogo } from "./LazuardiLogo";
@@ -22,6 +23,8 @@ interface HeaderProps {
   showCharts: boolean;
   onOpenPrintReport: () => void;
   onOpenAppsScript: () => void;
+  onOpenHistory?: () => void;
+  submissionCount?: number;
   activeMonthNum: number;
   onChangeActiveMonth: (monthNum: number) => void;
   webAppUrl?: string;
@@ -37,6 +40,8 @@ export const Header: React.FC<HeaderProps> = ({
   showCharts,
   onOpenPrintReport,
   onOpenAppsScript,
+  onOpenHistory,
+  submissionCount = 0,
   activeMonthNum,
   onChangeActiveMonth,
   webAppUrl = ""
@@ -153,6 +158,18 @@ export const Header: React.FC<HeaderProps> = ({
               <FileCode className={`w-3.5 h-3.5 mr-1.5 ${webAppUrl ? "text-emerald-300" : "text-amber-300"}`} />
               <span>{webAppUrl ? "🟢 Webhook Sheet" : "⚠️ Sambung Sheet"}</span>
             </button>
+
+            {/* Kelola / Riwayat Pengajuan Button */}
+            {onOpenHistory && (
+              <button
+                onClick={onOpenHistory}
+                className="inline-flex items-center px-3 py-1.5 border border-blue-300/30 rounded-xl text-xs font-bold bg-white/10 hover:bg-white/20 text-white transition-all cursor-pointer shadow-xs"
+                title="Lihat, Edit, atau Hapus Data Pengajuan APBS"
+              >
+                <History className="w-3.5 h-3.5 mr-1.5 text-amber-300" />
+                <span>Daftar Pengajuan ({submissionCount})</span>
+              </button>
+            )}
 
             {/* Printable Report */}
             <button
