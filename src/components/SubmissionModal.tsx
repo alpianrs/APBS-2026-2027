@@ -9,6 +9,7 @@ interface SubmissionModalProps {
   items: ApbsItem[];
   preselectedRecapItem?: ApbsRecapItem | null;
   editSubmission?: ApbsSubmission | null;
+  submissions?: ApbsSubmission[];
   onSave: (submission: Omit<ApbsSubmission, "id"> & { id?: string }) => void;
   defaultMonthNum: number;
 }
@@ -19,6 +20,7 @@ export const SubmissionModal: React.FC<SubmissionModalProps> = ({
   items,
   preselectedRecapItem,
   editSubmission,
+  submissions = [],
   onSave,
   defaultMonthNum
 }) => {
@@ -175,6 +177,27 @@ export const SubmissionModal: React.FC<SubmissionModalProps> = ({
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs">
           
+          {/* Informational Banner if selected item has pending unreported submissions */}
+          {!editSubmission && selectedItemId && (() => {
+            const itemExistingSubs = submissions.filter((s) => s.itemId === selectedItemId);
+            const itemUnreportedSubs = itemExistingSubs.filter((s) => s.nominalPengajuan > 0 && (!s.isReported || s.nominalRealisasi === 0));
+            if (itemUnreportedSubs.length === 0) return null;
+
+            return (
+              <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-950 flex items-start space-x-2.5 shadow-2xs">
+                <AlertTriangle className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
+                <div className="space-y-0.5 text-xs">
+                  <div className="font-bold text-amber-950">
+                    ℹ️ Kode APBS ini memiliki {itemUnreportedSubs.length} pengajuan sebelumnya yang belum dilaporkan (LPJ)
+                  </div>
+                  <p className="text-[11px] text-amber-800 leading-normal">
+                    Pengajuan baru yang Anda buat sekarang akan dicatat sebagai dokumen pengajuan tambahan. Anda dapat membuat beberapa pengajuan dan melaporkan LPJ masing-masing secara terpisah.
+                  </p>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Item Selector */}
           <div>
             <label className="block font-bold text-slate-700 mb-1">

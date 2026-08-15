@@ -26,6 +26,7 @@ interface ApbsTableProps {
   onOpenPurchaseDetailModal: (sub: ApbsSubmission, item: ApbsItem) => void;
   onEditSubmission: (sub: ApbsSubmission) => void;
   onDeleteSubmission: (subId: string) => void;
+  onSearchChange?: (query: string) => void;
 }
 
 type SortField = "rek" | "name" | "targetApbsTotal" | "totalPengajuan" | "totalRealisasi" | "sisaApbs" | "status";
@@ -36,7 +37,8 @@ export const ApbsTable: React.FC<ApbsTableProps> = ({
   onOpenReportModal,
   onOpenPurchaseDetailModal,
   onEditSubmission,
-  onDeleteSubmission
+  onDeleteSubmission,
+  onSearchChange
 }) => {
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   const [sortField, setSortField] = useState<SortField>("name");
@@ -286,7 +288,10 @@ export const ApbsTable: React.FC<ApbsTableProps> = ({
             ) : (
               paginatedItems.map((r) => {
                 const isExpanded = !!expandedRows[r.item.id];
-                const pendingSub = r.submissionsForMonth.find((s) => s.nominalPengajuan > 0 && (!s.isReported || s.nominalRealisasi === 0));
+                const pendingSubs = r.submissionsForMonth.filter(
+                  (s) => s.nominalPengajuan > 0 && (!s.isReported || s.nominalRealisasi === 0)
+                );
+                const hasPending = pendingSubs.length > 0;
 
                 return (
                   <React.Fragment key={r.item.id}>
@@ -305,7 +310,7 @@ export const ApbsTable: React.FC<ApbsTableProps> = ({
                       <td className="py-3 px-2 text-center">
                         <button
                           onClick={() => toggleRow(r.item.id)}
-                          className="p-1 rounded-lg text-slate-400 hover:text-[#0F2C59] hover:bg-slate-200 transition-colors"
+                          className="p-1 rounded-lg text-slate-400 hover:text-[#0F2C59] hover:bg-slate-200 transition-colors cursor-pointer"
                           title="Lihat Jadwal Bulanan & Log Pengajuan"
                         >
                           {isExpanded ? (
@@ -316,11 +321,22 @@ export const ApbsTable: React.FC<ApbsTableProps> = ({
                         </button>
                       </td>
 
-                      {/* Kode APBS / No. Rekening */}
+                      {/* Kode APBS / No. Rekening - Clickable for Instant Search */}
                       <td className="py-3 px-3">
-                        <span className="inline-block px-2 py-0.5 rounded bg-slate-900 text-amber-300 font-mono font-extrabold text-[11px] shadow-2xs border border-amber-400/30">
-                          {r.item.rek || `REK-${r.item.rowIdx}`}
-                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (onSearchChange && r.item.rek) {
+                              onSearchChange(r.item.rek);
+                            }
+                          }}
+                          className="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-slate-900 hover:bg-blue-900 text-amber-300 font-mono font-extrabold text-[11px] shadow-2xs border border-amber-400/30 transition-all hover:scale-105 cursor-pointer group"
+                          title={`🔍 Klik untuk filter & cari kode APBS: ${r.item.rek || "Item"}`}
+                        >
+                          <span>{r.item.rek || `REK-${r.item.rowIdx}`}</span>
+                          <span className="opacity-0 group-hover:opacity-100 text-[9px] text-amber-400">🔍</span>
+                        </button>
                       </td>
 
                       {/* Deskripsi Nama Item (Kolom G) */}
@@ -356,33 +372,67 @@ export const ApbsTable: React.FC<ApbsTableProps> = ({
 
                       {/* Status Badge */}
                       <td className="py-3 px-3 text-center">
-                        {renderStatusBadge(r)}
+                        {pendingSubs.length > 1 ? (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-amber-100 text-amber-950 border border-amber-400 shadow-xs">
+                            <Clock className="w-3 h-3 mr-1 text-amber-800 animate-pulse" />
+                            {pendingSubs.length} Belum LPJ
+                          </span>
+                        ) : (
+                          renderStatusBadge(r)
+                        )}
                       </td>
 
-                      {/* Action Buttons */}
+                      {/* Action Buttons - Supports Multiple Pending LPJs and Submitting Again */}
                       <td className="py-3 px-3 text-center">
-                        <div className="flex items-center justify-center space-x-1">
+                        <div className="flex items-center justify-center space-x-1.5 flex-wrap gap-y-1">
                           
-                          {/* If item has pending submission LPJ, offer Lapor LPJ button */}
-                          {pendingSub ? (
+                          {/* Case 1: 1 Pending LPJ */}
+                          {pendingSubs.length === 1 && (
                             <button
-                              onClick={() => onOpenReportModal(pendingSub, r.item)}
-                              className="inline-flex items-center px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-[11px] shadow-xs transition-transform active:scale-95"
+                              onClick={() => onOpenReportModal(pendingSubs[0], r.item)}
+                              className="inline-flex items-center px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-[10px] shadow-xs transition-transform active:scale-95 cursor-pointer"
                               title="Isi Laporan Realisasi LPJ"
                             >
-                              <FileCheck className="w-3.5 h-3.5 mr-1" />
+                              <FileCheck className="w-3 h-3 mr-1" />
                               <span>Lapor LPJ</span>
                             </button>
-                          ) : (
+                          )}
+
+                          {/* Case 2: 2 or more Pending LPJs */}
+                          {pendingSubs.length > 1 && (
                             <button
-                              onClick={() => onOpenSubmissionForItem(r)}
-                              className="inline-flex items-center px-2 py-1 rounded-lg bg-[#0F2C59] hover:bg-[#1E3A8A] text-white font-bold text-[11px] shadow-xs transition-colors"
-                              title="Buat Pengajuan APBS Baru"
+                              onClick={() => {
+                                if (!isExpanded) {
+                                  toggleRow(r.item.id);
+                                } else {
+                                  onOpenReportModal(pendingSubs[0], r.item);
+                                }
+                              }}
+                              className="inline-flex items-center px-2 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-[10px] shadow-xs transition-transform active:scale-95 cursor-pointer"
+                              title={`${pendingSubs.length} pengajuan belum LPJ. Klik untuk memilih pengajuan`}
                             >
-                              <PlusCircle className="w-3.5 h-3.5 mr-1 text-amber-300" />
-                              <span>+ Ajukan</span>
+                              <FileCheck className="w-3 h-3 mr-1" />
+                              <span>LPJ ({pendingSubs.length})</span>
                             </button>
                           )}
+
+                          {/* Always allow "+ Ajukan" or "+ Ajukan Lagi" so users can submit multiple times */}
+                          <button
+                            onClick={() => onOpenSubmissionForItem(r)}
+                            className={`inline-flex items-center px-2 py-1 rounded-lg text-white font-bold text-[10px] shadow-xs transition-all cursor-pointer ${
+                              hasPending
+                                ? "bg-[#0F2C59] hover:bg-blue-900 border border-blue-400/40 text-amber-300"
+                                : "bg-[#0F2C59] hover:bg-[#1E3A8A]"
+                            }`}
+                            title={
+                              hasPending
+                                ? `Ajukan pengajuan tambahan untuk kode ${r.item.rek || "APBS"} (Sudah ada ${pendingSubs.length} belum LPJ)`
+                                : "Buat Pengajuan APBS Baru"
+                            }
+                          >
+                            <PlusCircle className="w-3 h-3 mr-1 text-amber-300" />
+                            <span>{hasPending ? "+ Ajukan Lagi" : "+ Ajukan"}</span>
+                          </button>
 
                         </div>
                       </td>
@@ -445,14 +495,14 @@ export const ApbsTable: React.FC<ApbsTableProps> = ({
                               <div className="flex items-center justify-between mb-2">
                                 <h5 className="text-xs font-bold text-slate-800 flex items-center">
                                   <Layers className="w-3.5 h-3.5 mr-1.5 text-blue-800" />
-                                  Riwayat Catatan Pengajuan & LPJ Realisasi:
+                                  Riwayat Catatan Pengajuan & LPJ Realisasi ({r.submissionsForMonth.length} Pengajuan):
                                 </h5>
 
                                 <button
                                   onClick={() => onOpenSubmissionForItem(r)}
-                                  className="text-[11px] font-bold text-blue-900 hover:text-amber-700 underline flex items-center"
+                                  className="text-[11px] font-extrabold text-[#0F2C59] hover:text-blue-700 bg-amber-200/80 hover:bg-amber-300 px-2.5 py-1 rounded-lg border border-amber-400 flex items-center transition-colors shadow-2xs cursor-pointer"
                                 >
-                                  <PlusCircle className="w-3.5 h-3.5 mr-1" /> Buat Pengajuan Baru
+                                  <PlusCircle className="w-3.5 h-3.5 mr-1 text-blue-950" /> + Ajukan Lagi (Pengajuan Baru)
                                 </button>
                               </div>
 
@@ -462,7 +512,7 @@ export const ApbsTable: React.FC<ApbsTableProps> = ({
                                 </p>
                               ) : (
                                 <div className="space-y-2">
-                                  {r.submissionsForMonth.map((sub) => {
+                                  {r.submissionsForMonth.map((sub, idx) => {
                                     const monthObj = LAZUARDI_MONTHS.find(
                                       (m) => m.num === sub.monthNum
                                     );
@@ -472,13 +522,18 @@ export const ApbsTable: React.FC<ApbsTableProps> = ({
                                     return (
                                       <div
                                         key={sub.id}
-                                        className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs shadow-2xs hover:border-blue-300 transition-colors"
+                                        className={`bg-white border rounded-xl p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs shadow-2xs transition-colors ${
+                                          !isReported ? "border-amber-300 bg-amber-50/20" : "border-slate-200 hover:border-blue-300"
+                                        }`}
                                       >
                                         <div className="space-y-1">
                                           <div className="font-bold text-slate-800 flex flex-wrap items-center gap-2">
-                                            <span className="text-[#0F2C59]">Bulan {monthObj?.name}</span>
+                                            <span className="bg-slate-900 text-amber-300 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold">
+                                              #{r.submissionsForMonth.length - idx}
+                                            </span>
+                                            <span className="text-[#0F2C59] font-extrabold">Bulan {monthObj?.name}</span>
                                             <span className="text-slate-300">•</span>
-                                            <span className="text-slate-600">Tgl Pengajuan: {sub.tanggalPengajuan}</span>
+                                            <span className="text-slate-600 font-medium">Tgl: {sub.tanggalPengajuan}</span>
                                             
                                             {sub.noSpkOrKwitansi && (
                                               <span className="bg-blue-50 text-blue-900 font-mono font-bold px-2 py-0.5 rounded text-[10px] border border-blue-200">
@@ -489,7 +544,7 @@ export const ApbsTable: React.FC<ApbsTableProps> = ({
                                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${
                                               isReported
                                                 ? "bg-blue-50 text-blue-900 border-blue-200"
-                                                : "bg-amber-100 text-amber-950 border-amber-300"
+                                                : "bg-amber-100 text-amber-950 border-amber-400"
                                             }`}>
                                               {isReported ? "✅ LPJ Selesai" : "📋 Belum Laporan (LPJ)"}
                                             </span>

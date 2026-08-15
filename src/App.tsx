@@ -330,13 +330,18 @@ export default function App() {
   // Filter recap items based on user search & filter selections
   const filteredRecapItems = useMemo(() => {
     return allRecapItems.filter((r) => {
-      // Search query filter (Kolom G Deskripsi Nama Item)
+      // Search query filter (Kode APBS, Kolom G Deskripsi Nama Item, Unit, Kategori)
       if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const matchName = r.item.name.toLowerCase().includes(q);
-        const matchUnit = r.item.unit.toLowerCase().includes(q);
-        const matchCategory = r.item.category.toLowerCase().includes(q);
-        if (!matchName && !matchUnit && !matchCategory) return false;
+        const q = searchQuery.toLowerCase().trim();
+        const matchRek = (r.item.rek || "").toLowerCase().includes(q);
+        const matchName = (r.item.name || "").toLowerCase().includes(q);
+        const matchUnit = (r.item.unit || "").toLowerCase().includes(q);
+        const matchCategory = (r.item.category || "").toLowerCase().includes(q);
+        const matchPelaksana = (r.item.pelaksana || "").toLowerCase().includes(q);
+        const matchActivity = (r.item.activity || "").toLowerCase().includes(q);
+        if (!matchRek && !matchName && !matchUnit && !matchCategory && !matchPelaksana && !matchActivity) {
+          return false;
+        }
       }
 
       // Unit filter
@@ -623,13 +628,12 @@ export default function App() {
             {/* Main Interactive Table */}
             <ApbsTable
               recapItems={filteredRecapItems}
-              activeMonthNum={activeMonthNum}
-              selectedMonthFilter={selectedMonthFilter}
               onOpenSubmissionForItem={handleOpenSubmissionForItem}
               onEditSubmission={handleEditSubmission}
               onOpenReportModal={handleOpenReportModal}
-              onOpenPurchaseDetails={handleOpenPurchaseDetailModal}
+              onOpenPurchaseDetailModal={handleOpenPurchaseDetailModal}
               onDeleteSubmission={handleDeleteSubmission}
+              onSearchChange={setSearchQuery}
             />
 
           </div>
@@ -648,6 +652,7 @@ export default function App() {
         items={items}
         preselectedRecapItem={preselectedRecapItem}
         editSubmission={editSubmission}
+        submissions={submissions}
         onSave={handleSaveSubmission}
         defaultMonthNum={activeMonthNum}
       />
