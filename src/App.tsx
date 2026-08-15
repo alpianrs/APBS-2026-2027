@@ -148,6 +148,16 @@ export default function App() {
 
   // Helper to sync single submission to Google Apps Script Web App
   const syncSubmissionToGoogleSheet = async (sub: ApbsSubmission, action: "save" | "delete" = "save") => {
+    if (!webAppUrl) {
+      showToast(
+        "warn",
+        "💾 Pengajuan tersimpan di aplikasi. Hubungkan URL Webhook Google Apps Script untuk otomatis mencatat ke Google Sheet.",
+        "Sambungkan Sekarang",
+        () => setIsAppsScriptModalOpen(true)
+      );
+      return;
+    }
+
     const targetItem = items.find((it) => it.id === sub.itemId);
     const payload = {
       webAppUrl,
@@ -171,7 +181,15 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
+
+      const responseText = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        data = { success: false, message: "Gagal membaca format data respon server." };
+      }
+
       if (data.success) {
         showToast("success", "✅ Pengajuan berhasil dicatat ke tab LOG_PENGAJUAN_LPJ di Google Sheet!");
       } else if (data.reason === "NO_WEBHOOK_URL") {
@@ -230,7 +248,14 @@ export default function App() {
         })
       });
 
-      const data = await res.json();
+      const responseText = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        data = { success: false, message: "Gagal memproses respon server." };
+      }
+
       if (data.success) {
         showToast(
           "success",

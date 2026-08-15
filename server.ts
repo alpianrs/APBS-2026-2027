@@ -134,13 +134,22 @@ async function startServer() {
   app.post("/api/sync-submission", async (req, res) => {
     try {
       const { webAppUrl, submission, submissions, action = "save", pin } = req.body;
-      const targetUrl = webAppUrl || process.env.APPS_SCRIPT_URL;
+      const targetUrl = (webAppUrl || process.env.APPS_SCRIPT_URL || "").trim();
 
       if (!targetUrl || !targetUrl.startsWith("http")) {
         return res.json({
           success: false,
           reason: "NO_WEBHOOK_URL",
-          message: "Google Apps Script Web App URL belum diatur. Silakan masukkan Web App URL di menu Apps Script."
+          message: "URL Google Apps Script Web App belum diisi. Silakan masukkan Web App URL di menu Apps Script."
+        });
+      }
+
+      // Check if user accidentally pasted Google Sheets edit URL instead of Web App URL
+      if (targetUrl.includes("docs.google.com/spreadsheets")) {
+        return res.json({
+          success: false,
+          reason: "INVALID_SPREADSHEET_URL",
+          message: "URL yang dimasukkan adalah link Google Spreadsheet, bukan link Web App Apps Script. Silakan ikuti petunjuk Deploy Web App (URL yang berakhiran /exec)."
         });
       }
 
@@ -162,21 +171,45 @@ async function startServer() {
 
       const responseText = await response.text();
       let parsedResponse: any = {};
+      let isJson = false;
+
       try {
         parsedResponse = JSON.parse(responseText);
+        isJson = true;
       } catch {
-        parsedResponse = { text: responseText };
+        parsedResponse = { raw: responseText.slice(0, 300) };
+      }
+
+      // Check if Google returned an HTML error page (e.g. 404, authorization needed, etc.)
+      const isHtmlResponse =
+        responseText.toLowerCase().includes("<!doctype") ||
+        responseText.toLowerCase().includes("<html") ||
+        responseText.toLowerCase().includes("the page cannot be found") ||
+        responseText.toLowerCase().includes("the page could not be loaded");
+
+      if (isHtmlResponse || (!response.ok && !isJson)) {
+        return res.json({
+          success: false,
+          message: "Google Apps Script mengembalikan halaman HTML. Pastikan Web App di-Deploy dengan setelan: 'Execute as: Me' dan 'Who has access: Anyone' agar dapat diakses oleh aplikasi."
+        });
+      }
+
+      if (parsedResponse.success === false) {
+        return res.json({
+          success: false,
+          message: parsedResponse.error || parsedResponse.message || "Gagal memproses data di Google Apps Script."
+        });
       }
 
       res.json({
         success: true,
         targetUrl,
         result: parsedResponse,
-        message: "Data berhasil dikirim ke Google Apps Script Spreadsheet!"
+        message: "Data berhasil dicatat ke Google Sheet (tab LOG_PENGAJUAN_LPJ)!"
       });
     } catch (error: any) {
       console.error("Error syncing to Google Apps Script:", error);
-      res.status(500).json({
+      res.json({
         success: false,
         error: error.message || "Gagal menghubungi Webhook Google Apps Script"
       });
@@ -192,8 +225,8 @@ async function startServer() {
       });
     }
 
-    const targetUrl = webAppUrl || process.env.APPS_SCRIPT_URL;
-    if (targetUrl && targetUrl.startsWith("http")) {
+    const targetUrl = (webAppUrl || process.env.APPS_SCRIPT_URL || "").trim();
+    if (targetUrl && targetUrl.startsWith("http") && !targetUrl.includes("docs.google.com/spreadsheets")) {
       try {
         await fetch(targetUrl, {
           method: "POST",

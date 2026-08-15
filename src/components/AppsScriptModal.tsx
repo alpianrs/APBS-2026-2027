@@ -217,7 +217,13 @@ function testWebhook() {
 
   const handleSaveUrl = (e: React.FormEvent) => {
     e.preventDefault();
-    onSaveWebAppUrl(inputUrl.trim());
+    const cleanUrl = inputUrl.trim();
+    if (cleanUrl.includes("docs.google.com/spreadsheets")) {
+      setTestStatus("error");
+      setTestMessage("⚠️ Link yang dimasukkan adalah URL Spreadsheet. Untuk Webhook, gunakan URL Web App Apps Script (berakhiran /exec). Lihat langkah 4 di bawah.");
+      return;
+    }
+    onSaveWebAppUrl(cleanUrl);
     setTestStatus("idle");
     setTestMessage("URL Web App berhasil disimpan!");
   };
@@ -227,6 +233,12 @@ function testWebhook() {
     if (!url) {
       setTestStatus("error");
       setTestMessage("Masukkan URL Web App Apps Script terlebih dahulu.");
+      return;
+    }
+
+    if (url.includes("docs.google.com/spreadsheets")) {
+      setTestStatus("error");
+      setTestMessage("⚠️ URL yang Anda masukkan adalah link Spreadsheet Google Sheet. Anda perlu menerapkan Web App dari menu Ekstensi -> Apps Script dan menggunakan URL yang berakhiran /exec.");
       return;
     }
 
@@ -244,14 +256,24 @@ function testWebhook() {
         })
       });
 
-      const data = await res.json();
+      const responseText = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        data = {
+          success: false,
+          message: "Respon bukan format JSON. Pastikan Web App di-Deploy dengan hak akses 'Anyone' (Siapa saja)."
+        };
+      }
+
       if (data.success) {
         setTestStatus("success");
         setTestMessage("✅ Koneksi Berhasil! Google Apps Script siap mencatat pengajuan LPJ secara real-time.");
         onSaveWebAppUrl(url);
       } else {
         setTestStatus("error");
-        setTestMessage(`⚠️ Respon: ${data.message || data.error || "Gagal menghubungi Apps Script"}`);
+        setTestMessage(`⚠️ ${data.message || data.error || "Gagal menghubungi Apps Script"}`);
       }
     } catch (err: any) {
       setTestStatus("error");
