@@ -17,9 +17,9 @@ import { LazuardiLogo } from "./components/LazuardiLogo";
 
 import { ApbsItem, ApbsSubmission, ApbsStatusType, ApbsRecapItem } from "./types";
 import { calculateApbsRecap, computeApbsSummary } from "./lib/apbsCalculations";
-import { LAZUARDI_MONTHS, getCurrentSchoolMonth, getMonthInfo } from "./lib/constants";
+import { LAZUARDI_MONTHS, getCurrentSchoolMonth, getMonthInfo, DEFAULT_APPS_SCRIPT_URL } from "./lib/constants";
 import { fetchDirectCsvData } from "./lib/sheetParser";
-import { executeAppsScriptSync } from "./lib/syncService";
+import { executeAppsScriptSync, sanitizeAppsScriptUrl } from "./lib/syncService";
 import {
   RefreshCw,
   AlertCircle,
@@ -51,9 +51,14 @@ export default function App() {
 
   const [webAppUrl, setWebAppUrl] = useState<string>(() => {
     try {
-      return localStorage.getItem(STORAGE_KEY_WEBHOOK) || "";
+      const saved = localStorage.getItem(STORAGE_KEY_WEBHOOK);
+      if (!saved || saved.includes("/dev") || saved.includes("AKfycby2g9GOylm6yE_wLc1O2oImPasF24YBG6Szu5tZWs4")) {
+        localStorage.setItem(STORAGE_KEY_WEBHOOK, DEFAULT_APPS_SCRIPT_URL);
+        return DEFAULT_APPS_SCRIPT_URL;
+      }
+      return sanitizeAppsScriptUrl(saved);
     } catch {
-      return "";
+      return DEFAULT_APPS_SCRIPT_URL;
     }
   });
 

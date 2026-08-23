@@ -32,11 +32,33 @@ export interface SyncResponse {
 }
 
 /**
+ * Normalizes and sanitizes Apps Script Web App URL.
+ * Automatically converts /dev (Test Deployment) to /exec (Production Web App)
+ * because Google strictly blocks CORS fetch requests to /dev.
+ */
+export function sanitizeAppsScriptUrl(rawUrl: string): string {
+  if (!rawUrl) return "";
+  let url = rawUrl.trim();
+  
+  // Remove wrapping quotes if pasted from config
+  url = url.replace(/^["']|["']$/g, "");
+
+  // Auto-convert /dev to /exec
+  if (url.includes("/macros/s/") && url.endsWith("/dev")) {
+    url = url.replace(/\/dev$/, "/exec");
+  } else if (url.includes("/macros/s/") && url.includes("/dev?")) {
+    url = url.replace("/dev?", "/exec?");
+  }
+
+  return url;
+}
+
+/**
  * Execute sync to Google Apps Script Web App directly from the browser,
- * with fallback to local proxy if available.
+ * with fallback to local proxy and no-cors mode if needed.
  */
 export async function executeAppsScriptSync(payload: SyncPayload): Promise<SyncResponse> {
-  const targetUrl = (payload.webAppUrl || "").trim();
+  const targetUrl = sanitizeAppsScriptUrl(payload.webAppUrl || "");
 
   if (!targetUrl || !targetUrl.startsWith("http")) {
     return {
@@ -48,14 +70,19 @@ export async function executeAppsScriptSync(payload: SyncPayload): Promise<SyncR
   if (targetUrl.includes("docs.google.com/spreadsheets")) {
     return {
       success: false,
-      message: "URL yang dimasukkan adalah link Google Spreadsheet, bukan link Web App Apps Script (/exec)."
+      message: "URL yang dimasukkan adalah link Google Spreadsheet. Gunakan link Web App Apps Script yang berakhiran /exec."
     };
   }
 
-  // Strategy 1: Direct GET request to Google Apps Script (Supports CORS natively on Google Web Apps)
+  const sanitizedPayload: SyncPayload = {
+    ...payload,
+    webAppUrl: targetUrl
+  };
+
+  // Strategy 1: Direct GET request with URL query parameter (Natively avoids preflight & CORS redirect blocks)
   try {
-    const encodedPayload = encodeURIComponent(JSON.stringify(payload));
-    const directGetUrl = `${targetUrl}${targetUrl.includes("?") ? "&" : "?"}data=${encodedPayload}&action=${payload.action}`;
+    const encodedPayload = encodeURIComponent(JSON.stringify(sanitizedPayload));
+    const directGetUrl = `${targetUrl}${targetUrl.includes("?") ? "&" : "?"}data=${encodedPayload}&action=${sanitizedPayload.action}&t=${Date.now()}`;
     
     const getRes = await fetch(directGetUrl, {
       method: "GET",
@@ -80,19 +107,19 @@ export async function executeAppsScriptSync(payload: SyncPayload): Promise<SyncR
           return { success: false, message: json.error };
         }
       } catch {
-        // Continue to Strategy 2
+        // Fall through to next strategy
       }
     }
   } catch (directGetErr) {
     console.warn("Direct GET to Apps Script failed, trying Direct POST:", directGetErr);
   }
 
-  // Strategy 2: Direct POST request to Google Apps Script (Content-Type: text/plain bypasses preflight)
+  // Strategy 2: Direct POST request with text/plain (simple request avoids CORS OPTIONS preflight)
   try {
     const postRes = await fetch(targetUrl, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(sanitizedPayload),
       redirect: "follow"
     });
 
@@ -113,19 +140,19 @@ export async function executeAppsScriptSync(payload: SyncPayload): Promise<SyncR
           return { success: false, message: json.error };
         }
       } catch {
-        // Check if HTML error
+        // Fall through
       }
     }
   } catch (directPostErr) {
-    console.warn("Direct POST to Apps Script failed, trying Local Proxy if available:", directPostErr);
+    console.warn("Direct POST to Apps Script failed, trying Local/Serverless Proxy:", directPostErr);
   }
 
-  // Strategy 3: Try Local Backend Proxy (if available, e.g., running container or dev server)
+  // Strategy 3: Try Local/Vercel Serverless Proxy /api/sync-submission (Bypasses browser CORS entirely)
   try {
     const proxyRes = await fetch("/api/sync-submission", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(sanitizedPayload)
     });
 
     if (proxyRes.ok) {
@@ -146,14 +173,14 @@ export async function executeAppsScriptSync(payload: SyncPayload): Promise<SyncR
     console.warn("Proxy attempt failed:", proxyErr);
   }
 
-  // Strategy 4: Fallback for POST using mode: 'no-cors' (Fire and forget, guaranteed delivery to Google)
-  if (payload.action !== "ping" && payload.action !== "read") {
+  // Strategy 4: Fallback for POST using mode: 'no-cors' (Fire and forget, guaranteed delivery to Google Sheet)
+  if (sanitizedPayload.action !== "ping" && sanitizedPayload.action !== "read") {
     try {
       await fetch(targetUrl, {
         method: "POST",
         mode: "no-cors",
         headers: { "Content-Type": "text/plain" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(sanitizedPayload)
       });
       return {
         success: true,
@@ -166,6 +193,6 @@ export async function executeAppsScriptSync(payload: SyncPayload): Promise<SyncR
 
   return {
     success: false,
-    message: "Gagal terhubung ke Google Apps Script. Pastikan Web App di-Deploy dengan hak akses 'Anyone' (Siapa saja) dan URL berakhiran /exec."
+    message: "Gagal terhubung ke Google Apps Script. Pastikan Web App di-Deploy dengan hak akses 'Anyone' (Siapa saja) dan URL berakhiran /exec (bukan /dev)."
   };
 }

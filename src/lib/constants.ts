@@ -1,5 +1,9 @@
 import { MonthInfo } from "../types";
 
+// Default Google Apps Script Web App URL for automated Sheet logging
+export const DEFAULT_APPS_SCRIPT_URL =
+  "https://script.google.com/macros/s/AKfycbx3HhPFgplKFWXiPOqiyAmf1y38c-GEjqq73lX5SZSuwEN2k-QSQEhL3iN_aaf863K7/exec";
+
 // Academic Year Lazuardi APBS Period: July (7) to June (6)
 export const LAZUARDI_MONTHS: MonthInfo[] = [
   { num: 7, name: "Juli", shortName: "Jul", order: 1 },

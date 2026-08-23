@@ -134,7 +134,18 @@ async function startServer() {
   app.post("/api/sync-submission", async (req, res) => {
     try {
       const { webAppUrl, submission, submissions, action = "save", pin } = req.body;
-      const targetUrl = (webAppUrl || process.env.APPS_SCRIPT_URL || "").trim();
+      let targetUrl = (
+        webAppUrl ||
+        process.env.APPS_SCRIPT_URL ||
+        "https://script.google.com/macros/s/AKfycbx3HhPFgplKFWXiPOqiyAmf1y38c-GEjqq73lX5SZSuwEN2k-QSQEhL3iN_aaf863K7/exec"
+      ).trim();
+
+      // Auto-convert /dev to /exec if present
+      if (targetUrl.includes("/macros/s/") && targetUrl.endsWith("/dev")) {
+        targetUrl = targetUrl.replace(/\/dev$/, "/exec");
+      } else if (targetUrl.includes("/macros/s/") && targetUrl.includes("/dev?")) {
+        targetUrl = targetUrl.replace("/dev?", "/exec?");
+      }
 
       if (!targetUrl || !targetUrl.startsWith("http")) {
         return res.json({

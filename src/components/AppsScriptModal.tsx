@@ -12,10 +12,12 @@ import {
   Send,
   RefreshCw,
   AlertCircle,
-  ExternalLink
+  ExternalLink,
+  ShieldCheck,
+  Zap
 } from "lucide-react";
 import { ApbsSubmission, ApbsItem } from "../types";
-import { executeAppsScriptSync } from "../lib/syncService";
+import { executeAppsScriptSync, sanitizeAppsScriptUrl } from "../lib/syncService";
 
 interface AppsScriptModalProps {
   isOpen: boolean;
@@ -44,6 +46,7 @@ export const AppsScriptModal: React.FC<AppsScriptModalProps> = ({
   const [inputUrl, setInputUrl] = useState<string>(webAppUrl);
   const [testStatus, setTestStatus] = useState<"idle" | "testing" | "success" | "error">("idle");
   const [testMessage, setTestMessage] = useState<string>("");
+  const [wasDevConverted, setWasDevConverted] = useState<boolean>(false);
 
   useEffect(() => {
     setInputUrl(webAppUrl);
@@ -53,13 +56,14 @@ export const AppsScriptModal: React.FC<AppsScriptModalProps> = ({
 
   const appScriptCode = `/**
  * ====================================================================
- * GOOGLE APPS SCRIPT - MONITORING APBS & AUTOMATED LPJ LAZUARDI (V3.0)
+ * GOOGLE APPS SCRIPT - MONITORING APBS & AUTOMATED LPJ LAZUARDI (V3.2)
  * ====================================================================
  * Fitur:
- * 1. Mendukung Universal GET dan POST (Bekerja 100% di semua akun Google Workspace & Pribadi).
- * 2. Otomatisasi Pencatatan Pengajuan & Realisasi LPJ langsung ke tab LOG_PENGAJUAN_LPJ.
- * 3. Mendukung Sinkronisasi Dua Arah & Hapus dengan PIN Keamanan 123.
- * 4. Menu kustom "🟢 APBS Lazuardi" di Spreadsheet.
+ * 1. Mendukung Universal GET & POST (Anti-CORS, Bekerja di Vercel, Netlify, Web).
+ * 2. Database Tanpa Batas (Unlimited Row Capacity) di tab LOG_PENGAJUAN_LPJ.
+ * 3. Otomatisasi Pencatatan Pengajuan & Realisasi LPJ Realtime.
+ * 4. Mendukung Sinkronisasi Dua Arah & Hapus dengan PIN Keamanan 123.
+ * 5. Menu kustom "🟢 APBS Lazuardi" di Spreadsheet.
  */
 
 // 1. MEMBUAT MENU KUSTOM DI GOOGLE SHEETS
@@ -160,7 +164,7 @@ function handleRequest(data) {
       const values = sheet.getDataRange().getValues();
       let found = false;
       for (let r = 1; r < values.length; r++) {
-        if (String(values[r][0]) === String(data.subId)) {
+        if (String(values[r][0]) === String(data.subId || data.id)) {
           sheet.getRange(r + 1, 13).setValue('DIHAPUS_PIN_123');
           sheet.getRange(r + 1, 1, 1, 13).setBackground('#FEE2E2');
           found = true;
@@ -168,6 +172,7 @@ function handleRequest(data) {
         }
       }
 
+      SpreadsheetApp.flush();
       return {
         success: true,
         message: found ? 'Data pengajuan berhasil ditandai dihapus!' : 'ID transaksi tidak ditemukan di log.'
@@ -175,11 +180,13 @@ function handleRequest(data) {
     }
 
     // D. SIMPAN ATAU UPDATE PENGAJUAN
-    const listToSave = data.submissions || (data.id || data.nominalPengajuan ? [data] : []);
+    const listToSave = data.submissions || (data.submission ? [data.submission] : (data.id || data.nominalPengajuan ? [data] : []));
     const existingValues = sheet.getDataRange().getValues();
     const existingIdMap = {};
     for (let r = 1; r < existingValues.length; r++) {
-      existingIdMap[String(values = existingValues[r][0])] = r + 1;
+      if (existingValues[r][0]) {
+        existingIdMap[String(existingValues[r][0])] = r + 1;
+      }
     }
 
     for (let i = 0; i < listToSave.length; i++) {
@@ -209,6 +216,7 @@ function handleRequest(data) {
       }
     }
 
+    SpreadsheetApp.flush();
     return {
       success: true,
       count: listToSave.length,
@@ -263,31 +271,53 @@ function testWebhook() {
     setTimeout(() => setCopied(false), 2500);
   };
 
+  const handleUrlInputChange = (val: string) => {
+    setInputUrl(val);
+    if (val.includes("/macros/s/") && (val.endsWith("/dev") || val.includes("/dev?"))) {
+      setWasDevConverted(true);
+    } else {
+      setWasDevConverted(false);
+    }
+  };
+
   const handleSaveUrl = (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanUrl = inputUrl.trim();
+    const cleanUrl = sanitizeAppsScriptUrl(inputUrl);
+
     if (cleanUrl.includes("docs.google.com/spreadsheets")) {
       setTestStatus("error");
-      setTestMessage("⚠️ Link yang dimasukkan adalah URL Spreadsheet. Untuk Webhook, gunakan URL Web App Apps Script (berakhiran /exec). Lihat langkah 4 di bawah.");
+      setTestMessage("⚠️ Link yang dimasukkan adalah URL Spreadsheet. Gunakan URL Web App Apps Script (berakhiran /exec).");
       return;
     }
+
+    if (inputUrl.includes("/dev")) {
+      setInputUrl(cleanUrl);
+      setWasDevConverted(true);
+    }
+
     onSaveWebAppUrl(cleanUrl);
-    setTestStatus("idle");
-    setTestMessage("URL Web App berhasil disimpan!");
+    setTestStatus("success");
+    setTestMessage("✅ URL Web App berhasil disimpan & dinormalisasi (/exec)!");
   };
 
   const handleTestConnection = async () => {
-    const url = inputUrl.trim();
-    if (!url) {
+    const rawUrl = inputUrl.trim();
+    if (!rawUrl) {
       setTestStatus("error");
       setTestMessage("Masukkan URL Web App Apps Script terlebih dahulu.");
       return;
     }
 
-    if (url.includes("docs.google.com/spreadsheets")) {
+    if (rawUrl.includes("docs.google.com/spreadsheets")) {
       setTestStatus("error");
       setTestMessage("⚠️ URL yang Anda masukkan adalah link Spreadsheet Google Sheet. Anda perlu menerapkan Web App dari menu Ekstensi -> Apps Script dan menggunakan URL yang berakhiran /exec.");
       return;
+    }
+
+    const cleanUrl = sanitizeAppsScriptUrl(rawUrl);
+    if (rawUrl.includes("/dev")) {
+      setInputUrl(cleanUrl);
+      setWasDevConverted(true);
     }
 
     setTestStatus("testing");
@@ -295,17 +325,17 @@ function testWebhook() {
 
     try {
       const data = await executeAppsScriptSync({
-        webAppUrl: url,
+        webAppUrl: cleanUrl,
         action: "ping"
       });
 
       if (data.success) {
         setTestStatus("success");
-        setTestMessage("✅ Koneksi Berhasil! Google Apps Script siap mencatat pengajuan LPJ secara real-time.");
-        onSaveWebAppUrl(url);
+        setTestMessage("✅ Koneksi Berhasil! Google Apps Script siap mencatat pengajuan & LPJ secara real-time.");
+        onSaveWebAppUrl(cleanUrl);
       } else {
         setTestStatus("error");
-        setTestMessage(`⚠️ ${data.message || data.error || "Gagal menghubungi Apps Script"}`);
+        setTestMessage(`⚠️ ${data.message || data.error || "Gagal menghubungi Apps Script. Pastikan Deploy sebagai Web App dengan akses 'Anyone'."}`);
       }
     } catch (err: any) {
       setTestStatus("error");
@@ -325,10 +355,10 @@ function testWebhook() {
             </div>
             <div>
               <h3 className="font-extrabold text-base text-white">
-                Integrasi Otomatis Google Sheets & LPJ Lazuardi
+                Integrasi Otomatis Google Sheets & LPJ Real-Time
               </h3>
               <p className="text-xs text-blue-100/90">
-                Pencatatan Otomatis Real-time ke Tab <code>LOG_PENGAJUAN_LPJ</code> di Google Sheet
+                Pencatatan Otomatis Tanpa Batas ke Tab <code>LOG_PENGAJUAN_LPJ</code> di Google Sheet
               </p>
             </div>
           </div>
@@ -344,6 +374,17 @@ function testWebhook() {
         {/* Content Body */}
         <div className="p-6 overflow-y-auto space-y-5 text-xs text-slate-700">
           
+          {/* Important CORS / /dev vs /exec Explanatory Banner */}
+          <div className="bg-amber-50 border-2 border-amber-400/80 rounded-2xl p-4 space-y-2 text-amber-950 shadow-xs">
+            <div className="flex items-center space-x-2 font-black text-xs text-amber-900 uppercase tracking-wider">
+              <ShieldCheck className="w-4 h-4 text-amber-700" />
+              <span>Solusi Error CORS & Masalah Pengajuan Tidak Masuk ke Sheet</span>
+            </div>
+            <p className="text-[11px] leading-relaxed">
+              Google Apps Script memblokir akses jika menggunakan URL Test Mode (<strong><code>/dev</code></strong>). Pastikan selalu menggunakan URL Production Web App yang berakhiran <strong><code>/exec</code></strong> dengan hak akses <strong>"Siapa saja" (Anyone)</strong>.
+            </p>
+          </div>
+
           {/* Web App URL Connection Section */}
           <div className="bg-blue-50/80 border-2 border-blue-300 rounded-2xl p-4.5 space-y-3 shadow-xs">
             <div className="flex items-center justify-between">
@@ -370,7 +411,7 @@ function testWebhook() {
               <input
                 type="text"
                 value={inputUrl}
-                onChange={(e) => setInputUrl(e.target.value)}
+                onChange={(e) => handleUrlInputChange(e.target.value)}
                 placeholder="https://script.google.com/macros/s/AKfycb.../exec"
                 className="flex-1 px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl font-mono text-xs text-slate-900 focus:ring-2 focus:ring-[#1855C6] focus:outline-none"
               />
@@ -392,6 +433,13 @@ function testWebhook() {
                 </button>
               </div>
             </form>
+
+            {wasDevConverted && (
+              <div className="p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl text-[11px] text-emerald-900 font-semibold flex items-center space-x-2">
+                <Zap className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>URL <code>/dev</code> otomatis dinormalisasi ke <code>/exec</code> agar tidak terblokir CORS oleh Google.</span>
+              </div>
+            )}
 
             {testMessage && (
               <div className={`p-3 rounded-xl text-xs font-semibold flex items-center space-x-2 ${
@@ -462,7 +510,7 @@ function testWebhook() {
                   <div>• <strong>Jalankan sebagai (Execute as):</strong> <em>Saya (email Anda / Alpianrs@lazuardi.sch.id)</em></div>
                   <div>• <strong>Siapa yang memiliki akses (Who has access):</strong> <em>Siapa saja (Anyone)</em></div>
                   <div className="text-rose-900 font-bold pt-1 border-t border-amber-200">
-                    ⚠️ PENTING: Klik tombol biru "Terapkan" (Deploy) di kanan bawah dialog Google Apps Script! (Jika menggunakan 'Kelola Deployment', pastikan memilih dropdown 'Versi Baru' sebelum klik Terapkan).
+                    ⚠️ PENTING: Jangan gunakan URL 'Uji Deployment' (/dev). Salin URL Deployment Resmi yang berakhiran <code>/exec</code>!
                   </div>
                 </div>
               </li>
